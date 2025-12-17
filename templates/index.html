@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Lichess Opening Coach</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Chessground (board + arrows) -->
+    <link rel="stylesheet" href="https://unpkg.com/chessground@9.1.1/assets/chessground.base.css">
+    <link rel="stylesheet" href="https://unpkg.com/chessground@9.1.1/assets/chessground.brown.css">
+    <link rel="stylesheet" href="https://unpkg.com/chessground@9.1.1/assets/chessground.cburnett.css">
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+
+  <body>
+    <div class="wrap">
+      <header class="header">
+        <h1>Lichess Opening Coach</h1>
+        <div class="controls">
+          <input id="username" placeholder="Lichess username" />
+          <label>Games <input id="maxGames" type="number" value="10" min="1" max="50" /></label>
+          <label>Plies <input id="plies" type="number" value="12" min="2" max="20" /></label>
+          <label>Depth <input id="depth" type="number" value="10" min="6" max="14" /></label>
+          <button id="analyzeBtn">Analyze</button>
+        </div>
+        <div id="status" class="status"></div>
+      </header>
+
+      <main class="main">
+        <section class="boardPanel">
+          <div id="board" class="board"></div>
+
+          <div class="legend">
+            <span class="dot red"></span> Played move (red)
+            <span class="dot green"></span> Recommended (green)
+          </div>
+
+          <pre id="details" class="details">Click a mistake to see it on the board.</pre>
+        </section>
+
+        <section class="listPanel">
+          <h2>Top recurring mistakes</h2>
+          <div id="recurringList" class="list"></div>
+
+          <h2>All mistakes</h2>
+          <div id="mistakeList" class="list"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
