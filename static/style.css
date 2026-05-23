@@ -55,7 +55,8 @@ body {
   font-weight: 650;
 }
 
-.controls input {
+.controls input,
+.controls select {
   width: 78px;
   padding: 9px 10px;
   border-radius: 8px;
@@ -68,7 +69,16 @@ body {
   width: 188px;
 }
 
+.controls #timeMode {
+  width: 96px;
+}
+
+.controls .timeControls {
+  width: 132px;
+}
+
 .controls input:disabled,
+.controls select:disabled,
 .controls button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
@@ -151,7 +161,7 @@ body {
 
 .summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
   margin-top: 12px;
 }

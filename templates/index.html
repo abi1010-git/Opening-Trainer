@@ -21,6 +21,14 @@
           <label>Games <input id="maxGames" type="number" value="10" min="1" max="50" /></label>
           <label>Plies <input id="plies" type="number" value="12" min="2" max="20" /></label>
           <label>Depth <input id="depth" type="number" value="10" min="6" max="14" /></label>
+          <label>Time
+            <select id="timeMode">
+              <option value="all">All</option>
+              <option value="include">Only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </label>
+          <input id="timeControls" class="timeControls" placeholder="3+0, 5+0" />
           <button id="analyzeBtn">Analyze</button>
         </div>
         <div id="status" class="status"></div>

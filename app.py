@@ -324,6 +324,40 @@ def format_time_control(raw: str | None) -> str:
     return raw
 
 
+def normalize_time_control(value: str | None) -> str:
+    return (value or "").replace(" ", "").strip().lower()
+
+
+def parse_time_filter(args):
+    mode = (args.get("timeMode") or args.get("time_mode") or "all").strip().lower()
+    if mode not in {"all", "include", "exclude"}:
+        mode = "all"
+
+    raw_controls = args.get("timeControls") or args.get("time_controls") or ""
+    controls = [
+        normalize_time_control(part)
+        for part in raw_controls.replace(";", ",").split(",")
+        if normalize_time_control(part)
+    ]
+
+    if not controls:
+        mode = "all"
+
+    return mode, controls
+
+
+def game_matches_time_filter(game_context, mode, controls):
+    if mode == "all" or not controls:
+        return True
+
+    candidates = {
+        normalize_time_control(game_context.get("time_control")),
+        normalize_time_control(game_context.get("time_control_raw")),
+    }
+    matches = bool(candidates.intersection(controls))
+    return matches if mode == "include" else not matches
+
+
 def player_game_context(game, username: str):
     white = game.headers.get("White") or "Unknown"
     black = game.headers.get("Black") or "Unknown"
@@ -360,10 +394,20 @@ def clamp_analysis_params(args):
     max_games = max(1, min(max_games, 50))
     plies = max(2, min(plies, 20))
     depth = max(6, min(depth, 14))
-    return max_games, plies, depth
+    time_mode, time_controls = parse_time_filter(args)
+    return max_games, plies, depth, time_mode, time_controls
 
 
-def analyze_opening_mistakes(username: str, max_games: int, plies: int, depth: int, progress_callback=None):
+def analyze_opening_mistakes(
+    username: str,
+    max_games: int,
+    plies: int,
+    depth: int,
+    time_mode: str = "all",
+    time_controls=None,
+    progress_callback=None,
+):
+    time_controls = time_controls or []
     if progress_callback:
         progress_callback(
             state="fetching",
@@ -372,20 +416,59 @@ def analyze_opening_mistakes(username: str, max_games: int, plies: int, depth: i
             message="Fetching recent Lichess games",
         )
     pgn = fetch_recent_pgn(username, max_games=max_games)
-    games = load_games(pgn)
+    fetched_games = load_games(pgn)
+    game_items = []
+    for original_index, game in enumerate(fetched_games, start=1):
+        game_context = player_game_context(game, username)
+        if game_matches_time_filter(game_context, time_mode, time_controls):
+            game_items.append((original_index, game, game_context))
+
+    games = [item[1] for item in game_items]
     total_games = len(games)
+    skipped_games = len(fetched_games) - total_games
 
     results = []
+
+    if progress_callback:
+        if time_mode == "all":
+            message = f"Fetched {len(fetched_games)} games"
+        else:
+            controls_label = ", ".join(time_controls)
+            message = f"Matched {total_games} of {len(fetched_games)} games for {time_mode} {controls_label}"
+        progress_callback(
+            state="filtering",
+            current_game=0,
+            total_games=total_games,
+            message=message,
+        )
 
     stockfish_path = resolve_stockfish_path()
     if not stockfish_path:
         raise RuntimeError("Stockfish engine not found. Set STOCKFISH_PATH or place stockfish/stockfish.exe in the engine folder.")
 
+    if total_games == 0:
+        return {
+            "username": username,
+            "analyzed_games": 0,
+            "fetched_games": len(fetched_games),
+            "skipped_games": skipped_games,
+            "total_mistakes": 0,
+            "recurring_mistake_count": 0,
+            "params": {
+                "max": max_games,
+                "plies": plies,
+                "depth": depth,
+                "time_mode": time_mode,
+                "time_controls": time_controls,
+            },
+            "top_recurring_mistakes": [],
+            "games": [],
+        }
+
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
-        for game_number, g in enumerate(games, start=1):
+        for game_number, (_, g, game_context) in enumerate(game_items, start=1):
             board = g.board()
             game_mistakes = []
-            game_context = player_game_context(g, username)
             if progress_callback:
                 progress_callback(
                     state="analyzing",
@@ -581,9 +664,17 @@ def analyze_opening_mistakes(username: str, max_games: int, plies: int, depth: i
     return {
         "username": username,
         "analyzed_games": len(games),
+        "fetched_games": len(fetched_games),
+        "skipped_games": skipped_games,
         "total_mistakes": total_mistakes,
         "recurring_mistake_count": len(recurring),
-        "params": {"max": max_games, "plies": plies, "depth": depth},
+        "params": {
+            "max": max_games,
+            "plies": plies,
+            "depth": depth,
+            "time_mode": time_mode,
+            "time_controls": time_controls,
+        },
         "top_recurring_mistakes": top_recurring,
         "games": results,
     }
@@ -592,15 +683,15 @@ def analyze_opening_mistakes(username: str, max_games: int, plies: int, depth: i
 # ---------------------- Main endpoints ----------------------
 @app.get("/lichess/<username>/opening_mistakes")
 def opening_mistakes(username: str):
-    max_games, plies, depth = clamp_analysis_params(request.args)
-    result = analyze_opening_mistakes(username, max_games, plies, depth)
+    max_games, plies, depth, time_mode, time_controls = clamp_analysis_params(request.args)
+    result = analyze_opening_mistakes(username, max_games, plies, depth, time_mode, time_controls)
     return jsonify(result)
 
 
 @app.post("/lichess/<username>/opening_mistakes/jobs")
 def start_opening_mistakes_job(username: str):
     cleanup_jobs()
-    max_games, plies, depth = clamp_analysis_params(request.args)
+    max_games, plies, depth, time_mode, time_controls = clamp_analysis_params(request.args)
     job_id = uuid.uuid4().hex
     now = time.time()
     with JOBS_LOCK:
@@ -611,6 +702,8 @@ def start_opening_mistakes_job(username: str):
             "total_games": max_games,
             "message": "Queued analysis",
             "progress_percent": 0,
+            "time_mode": time_mode,
+            "time_controls": time_controls,
             "created_at": now,
             "updated_at": now,
         }
@@ -623,7 +716,15 @@ def start_opening_mistakes_job(username: str):
             set_job_status(job_id, progress_percent=percent, **payload)
 
         try:
-            result = analyze_opening_mistakes(username, max_games, plies, depth, update_progress)
+            result = analyze_opening_mistakes(
+                username,
+                max_games,
+                plies,
+                depth,
+                time_mode,
+                time_controls,
+                update_progress,
+            )
             set_job_status(
                 job_id,
                 state="complete",

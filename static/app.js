@@ -71,11 +71,18 @@ function renderSummary(data, mistakes) {
   const summary = document.getElementById("summary");
   summary.replaceChildren();
 
+  const filter = data.params?.time_mode && data.params.time_mode !== "all"
+    ? `${data.params.time_mode} ${(data.params.time_controls || []).join(", ")}`
+    : "All";
+
   const stats = [
     ["Player", data.username],
-    ["Games", data.analyzed_games],
+    ["Analyzed", data.analyzed_games],
+    ["Fetched", data.fetched_games ?? data.analyzed_games],
+    ["Skipped", data.skipped_games ?? 0],
     ["Mistakes", data.total_mistakes ?? mistakes.length],
     ["Recurring", data.recurring_mistake_count ?? (data.top_recurring_mistakes || []).length],
+    ["Time filter", filter],
   ];
 
   for (const [label, value] of stats) {
@@ -248,6 +255,8 @@ function setControlsDisabled(disabled) {
   document.getElementById("maxGames").disabled = disabled;
   document.getElementById("plies").disabled = disabled;
   document.getElementById("depth").disabled = disabled;
+  document.getElementById("timeMode").disabled = disabled;
+  document.getElementById("timeControls").disabled = disabled;
 }
 
 function setProgress(percent, message, detail) {
@@ -273,7 +282,7 @@ async function pollAnalysisJob(jobId) {
     const total = job.total_games || 1;
     const percent = job.progress_percent ?? Math.round((current / total) * 100);
     const detail = [
-      total ? `Game ${Math.min(current + (job.state === "analyzing" ? 1 : 0), total)} of ${total}` : null,
+      job.total_games ? `Game ${Math.min(current + (job.state === "analyzing" ? 1 : 0), job.total_games)} of ${job.total_games}` : null,
       job.game || null,
       job.time_control ? `Time control ${job.time_control}` : null,
     ].filter(Boolean).join(" - ");
@@ -298,10 +307,16 @@ async function analyze() {
   const maxGames = document.getElementById("maxGames").value;
   const plies = document.getElementById("plies").value;
   const depth = document.getElementById("depth").value;
+  const timeMode = document.getElementById("timeMode").value;
+  const timeControls = document.getElementById("timeControls").value.trim();
 
   const status = document.getElementById("status");
   if (!username) {
     status.textContent = "Enter a Lichess username first.";
+    return;
+  }
+  if (timeMode !== "all" && !timeControls) {
+    status.textContent = "Enter at least one time control, like 3+0.";
     return;
   }
 
@@ -313,7 +328,14 @@ async function analyze() {
   renderEmpty(document.getElementById("mistakeList"), "Analysis is running.");
   document.getElementById("details").textContent = "Analysis is running. The board will update when mistakes are found.";
 
-  const url = `/lichess/${encodeURIComponent(username)}/opening_mistakes/jobs?max=${maxGames}&plies=${plies}&depth=${depth}`;
+  const params = new URLSearchParams({
+    max: maxGames,
+    plies,
+    depth,
+    timeMode,
+    timeControls,
+  });
+  const url = `/lichess/${encodeURIComponent(username)}/opening_mistakes/jobs?${params.toString()}`;
 
   try {
     const res = await fetch(url, { method: "POST" });
@@ -341,7 +363,8 @@ async function analyze() {
       }
     }
 
-    status.textContent = `Done. ${data.username} made ${plural(all.length, "opening mistake")} in ${plural(data.analyzed_games, "game")}.`;
+    const skippedText = data.skipped_games ? ` (${plural(data.skipped_games, "game")} skipped by time filter)` : "";
+    status.textContent = `Done. ${data.username} made ${plural(all.length, "opening mistake")} in ${plural(data.analyzed_games, "analyzed game")}${skippedText}.`;
     renderSummary(data, all);
     renderRecurring(document.getElementById("recurringList"), data.top_recurring_mistakes || []);
     renderMistakes(document.getElementById("mistakeList"), all);
@@ -350,6 +373,8 @@ async function analyze() {
     if (first) {
       setBoard(first.fen_before, first.move_uci, first.best_move_uci);
       renderDetails(first);
+    } else if (data.analyzed_games === 0) {
+      document.getElementById("details").textContent = "No games matched this time-control filter.";
     } else {
       document.getElementById("details").textContent = "No mistakes found for this player.";
     }
