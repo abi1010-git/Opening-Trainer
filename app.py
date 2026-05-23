@@ -10,10 +10,16 @@ from lichess.format import SINGLE_PGN
 import csv
 import os
 import shutil
+import threading
+import time
+import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__)
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+JOB_TTL_SECONDS = 60 * 60
 
 
 @app.errorhandler(Exception)
@@ -81,6 +87,23 @@ def load_eco_candidates(path="data/openings.csv"):
             out.setdefault(eco, []).append({"name": name, "moves": moves})
     print(f"Loaded ECO candidates for {len(out)} codes")
     return out
+
+
+def set_job_status(job_id, **updates):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def cleanup_jobs():
+    cutoff = time.time() - JOB_TTL_SECONDS
+    with JOBS_LOCK:
+        expired = [job_id for job_id, job in JOBS.items() if job.get("updated_at", 0) < cutoff]
+        for job_id in expired:
+            JOBS.pop(job_id, None)
 
 ECO_CANDIDATES = load_eco_candidates()
 
@@ -271,6 +294,36 @@ def is_players_turn(game, username: str, board: chess.Board) -> bool:
     return (board.turn == chess.WHITE and white == u) or (board.turn == chess.BLACK and black == u)
 
 
+def format_time_control(raw: str | None) -> str:
+    if not raw:
+        return "Unknown"
+
+    raw = raw.strip()
+    if raw == "-":
+        return "Untimed"
+
+    if "+" in raw:
+        base_raw, inc_raw = raw.split("+", 1)
+        try:
+            base_seconds = int(base_raw)
+            increment = int(inc_raw)
+            if base_seconds % 60 == 0:
+                base = str(base_seconds // 60)
+            else:
+                base = f"{base_seconds}s"
+            return f"{base}+{increment}"
+        except ValueError:
+            return raw
+
+    if raw.isdigit():
+        seconds = int(raw)
+        if seconds % 60 == 0:
+            return f"{seconds // 60} min"
+        return f"{seconds}s"
+
+    return raw
+
+
 def player_game_context(game, username: str):
     white = game.headers.get("White") or "Unknown"
     black = game.headers.get("Black") or "Unknown"
@@ -284,6 +337,8 @@ def player_game_context(game, username: str):
         user_color = "Unknown"
         opponent = f"{white} / {black}"
 
+    time_control_raw = game.headers.get("TimeControl")
+
     return {
         "white": white,
         "black": black,
@@ -292,37 +347,54 @@ def player_game_context(game, username: str):
         "result": game.headers.get("Result"),
         "date": game.headers.get("UTCDate") or game.headers.get("Date"),
         "site": game.headers.get("Site"),
+        "event": game.headers.get("Event"),
+        "time_control": format_time_control(time_control_raw),
+        "time_control_raw": time_control_raw,
     }
 
 
-# ---------------------- Main endpoint ----------------------
-@app.get("/lichess/<username>/opening_mistakes")
-def opening_mistakes(username: str):
-    max_games = int(request.args.get("max", "10"))
-    plies = int(request.args.get("plies", "12"))
-    depth = int(request.args.get("depth", "10"))
-
-    # Keep things reasonable so it runs fast
+def clamp_analysis_params(args):
+    max_games = int(args.get("max", "10"))
+    plies = int(args.get("plies", "12"))
+    depth = int(args.get("depth", "10"))
     max_games = max(1, min(max_games, 50))
     plies = max(2, min(plies, 20))
     depth = max(6, min(depth, 14))
+    return max_games, plies, depth
 
+
+def analyze_opening_mistakes(username: str, max_games: int, plies: int, depth: int, progress_callback=None):
+    if progress_callback:
+        progress_callback(
+            state="fetching",
+            current_game=0,
+            total_games=max_games,
+            message="Fetching recent Lichess games",
+        )
     pgn = fetch_recent_pgn(username, max_games=max_games)
     games = load_games(pgn)
+    total_games = len(games)
 
     results = []
 
     stockfish_path = resolve_stockfish_path()
     if not stockfish_path:
-        return jsonify({
-            "error": "Stockfish engine not found. Set STOCKFISH_PATH or place stockfish/stockfish.exe in the engine folder."
-        }), 500
+        raise RuntimeError("Stockfish engine not found. Set STOCKFISH_PATH or place stockfish/stockfish.exe in the engine folder.")
 
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
         for game_number, g in enumerate(games, start=1):
             board = g.board()
             game_mistakes = []
             game_context = player_game_context(g, username)
+            if progress_callback:
+                progress_callback(
+                    state="analyzing",
+                    current_game=game_number - 1,
+                    total_games=total_games,
+                    message=f"Analyzing game {game_number} of {total_games}",
+                    game=f"{game_context['white']} vs {game_context['black']}",
+                    time_control=game_context["time_control"],
+                )
 
             for ply, move in enumerate(g.mainline_moves(), start=1):
                 if ply > plies:
@@ -403,8 +475,25 @@ def opening_mistakes(username: str):
                 "opening": opening,
                 "mistakes": game_mistakes,
             })
+            if progress_callback:
+                progress_callback(
+                    state="analyzing",
+                    current_game=game_number,
+                    total_games=total_games,
+                    message=f"Analyzed game {game_number} of {total_games}",
+                    game=f"{game_context['white']} vs {game_context['black']}",
+                    time_control=game_context["time_control"],
+                )
 
     # ---------------------- Aggregation (recurring mistakes) ----------------------
+    if progress_callback:
+        progress_callback(
+            state="summarizing",
+            current_game=total_games,
+            total_games=total_games,
+            message="Summarizing recurring mistakes",
+        )
+
     agg = {}
 
     for game in results:
@@ -445,6 +534,9 @@ def opening_mistakes(username: str):
                     "result": game.get("result"),
                     "date": game.get("date"),
                     "site": game.get("site"),
+                    "event": game.get("event"),
+                    "time_control": game.get("time_control"),
+                    "time_control_raw": game.get("time_control_raw"),
                     "move_number": m.get("move_number"),
                     "side": m.get("side"),
                     "move_san": m.get("move_san"),
@@ -486,7 +578,7 @@ def opening_mistakes(username: str):
 
     total_mistakes = sum(len(game.get("mistakes", [])) for game in results)
 
-    return jsonify({
+    return {
         "username": username,
         "analyzed_games": len(games),
         "total_mistakes": total_mistakes,
@@ -494,7 +586,73 @@ def opening_mistakes(username: str):
         "params": {"max": max_games, "plies": plies, "depth": depth},
         "top_recurring_mistakes": top_recurring,
         "games": results,
-    })
+    }
+
+
+# ---------------------- Main endpoints ----------------------
+@app.get("/lichess/<username>/opening_mistakes")
+def opening_mistakes(username: str):
+    max_games, plies, depth = clamp_analysis_params(request.args)
+    result = analyze_opening_mistakes(username, max_games, plies, depth)
+    return jsonify(result)
+
+
+@app.post("/lichess/<username>/opening_mistakes/jobs")
+def start_opening_mistakes_job(username: str):
+    cleanup_jobs()
+    max_games, plies, depth = clamp_analysis_params(request.args)
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "id": job_id,
+            "state": "queued",
+            "current_game": 0,
+            "total_games": max_games,
+            "message": "Queued analysis",
+            "progress_percent": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def run_job():
+        def update_progress(**payload):
+            current = int(payload.get("current_game") or 0)
+            total = max(1, int(payload.get("total_games") or max_games))
+            percent = min(99, int((current / total) * 100))
+            set_job_status(job_id, progress_percent=percent, **payload)
+
+        try:
+            result = analyze_opening_mistakes(username, max_games, plies, depth, update_progress)
+            set_job_status(
+                job_id,
+                state="complete",
+                current_game=result["analyzed_games"],
+                total_games=result["analyzed_games"],
+                message="Analysis complete",
+                progress_percent=100,
+                result=result,
+            )
+        except Exception as exc:
+            app.logger.exception("Analysis job failed")
+            set_job_status(job_id, state="error", error=str(exc) or "Analysis failed", progress_percent=100)
+
+    threading.Thread(target=run_job, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.get("/lichess/jobs/<job_id>")
+def opening_mistakes_job_status(job_id: str):
+    cleanup_jobs()
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "Analysis job not found. Start a new analysis."}), 404
+        snapshot = dict(job)
+
+    snapshot.pop("created_at", None)
+    snapshot.pop("updated_at", None)
+    return jsonify(snapshot)
 
 
 if __name__ == "__main__":

@@ -57,9 +57,10 @@ function resultForUser(result, userColor) {
 
 function gameLine(item) {
   const player = item.user_color === "White" ? item.white : item.user_color === "Black" ? item.black : "Player";
+  const timeControl = item.time_control ? ` - ${item.time_control}` : "";
   return `Game ${item.game_number || "?"}: ${item.white || "White"} vs ${item.black || "Black"} - ` +
     `${player} as ${item.user_color || item.side || "player"} - ` +
-    `${resultForUser(item.result, item.user_color)}`;
+    `${resultForUser(item.result, item.user_color)}${timeControl}`;
 }
 
 function renderEmpty(container, message) {
@@ -114,11 +115,13 @@ function renderDetails(item, isRecurring = false) {
       detailRow("Played", formatMove(item.move_san, item.move_uci)),
       detailRow("Recommended", formatMove(item.recommended_move_san, item.recommended_move_uci)),
       detailRow("Common opponent", item.common_opponent),
+      detailRow("Time control", example.time_control),
       detailRow("Example", gameLine(example))
     );
   } else {
     grid.append(
       detailRow("Game", gameLine(item)),
+      detailRow("Time control", item.time_control),
       detailRow("Move", `${item.move_number || "?"} as ${item.side || item.user_color || "player"}`),
       detailRow("Played", formatMove(item.move_san, item.move_uci)),
       detailRow("Recommended", formatMove(item.best_move_san, item.best_move_uci)),
@@ -235,6 +238,61 @@ async function parseApiResponse(res) {
   );
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setControlsDisabled(disabled) {
+  document.getElementById("analyzeBtn").disabled = disabled;
+  document.getElementById("username").disabled = disabled;
+  document.getElementById("maxGames").disabled = disabled;
+  document.getElementById("plies").disabled = disabled;
+  document.getElementById("depth").disabled = disabled;
+}
+
+function setProgress(percent, message, detail) {
+  const panel = document.getElementById("progressPanel");
+  const fill = document.getElementById("progressFill");
+  const percentEl = document.getElementById("progressPercent");
+  const text = document.getElementById("progressText");
+  const detailEl = document.getElementById("progressDetail");
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+
+  panel.hidden = false;
+  fill.style.width = `${safePercent}%`;
+  percentEl.textContent = `${safePercent}%`;
+  text.textContent = message || "Loading...";
+  detailEl.textContent = detail || "";
+}
+
+async function pollAnalysisJob(jobId) {
+  while (true) {
+    const res = await fetch(`/lichess/jobs/${jobId}`);
+    const job = await parseApiResponse(res);
+    const current = job.current_game || 0;
+    const total = job.total_games || 1;
+    const percent = job.progress_percent ?? Math.round((current / total) * 100);
+    const detail = [
+      total ? `Game ${Math.min(current + (job.state === "analyzing" ? 1 : 0), total)} of ${total}` : null,
+      job.game || null,
+      job.time_control ? `Time control ${job.time_control}` : null,
+    ].filter(Boolean).join(" - ");
+
+    setProgress(percent, job.message || "Analyzing games", detail);
+
+    if (job.state === "complete") {
+      setProgress(100, "Analysis complete", `${job.result.analyzed_games} games analyzed`);
+      return job.result;
+    }
+
+    if (job.state === "error") {
+      throw new Error(job.error || "Analysis failed");
+    }
+
+    await sleep(700);
+  }
+}
+
 async function analyze() {
   const username = document.getElementById("username").value.trim();
   const maxGames = document.getElementById("maxGames").value;
@@ -247,13 +305,20 @@ async function analyze() {
     return;
   }
 
-  status.textContent = "Analyzing... (leave the server running)";
+  status.textContent = "Starting analysis...";
+  setProgress(0, "Loading...", "Preparing analysis");
+  setControlsDisabled(true);
+  document.getElementById("summary").replaceChildren();
+  renderEmpty(document.getElementById("recurringList"), "Analysis is running.");
+  renderEmpty(document.getElementById("mistakeList"), "Analysis is running.");
+  document.getElementById("details").textContent = "Analysis is running. The board will update when mistakes are found.";
 
-  const url = `/lichess/${encodeURIComponent(username)}/opening_mistakes?max=${maxGames}&plies=${plies}&depth=${depth}`;
+  const url = `/lichess/${encodeURIComponent(username)}/opening_mistakes/jobs?max=${maxGames}&plies=${plies}&depth=${depth}`;
 
   try {
-    const res = await fetch(url);
-    const data = await parseApiResponse(res);
+    const res = await fetch(url, { method: "POST" });
+    const started = await parseApiResponse(res);
+    const data = await pollAnalysisJob(started.job_id);
 
     const all = [];
     for (const g of data.games || []) {
@@ -269,6 +334,9 @@ async function analyze() {
           result: g.result,
           date: g.date,
           site: g.site,
+          event: g.event,
+          time_control: g.time_control,
+          time_control_raw: g.time_control_raw,
         });
       }
     }
@@ -287,6 +355,9 @@ async function analyze() {
     }
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
+    setProgress(100, "Analysis failed", e.message);
+  } finally {
+    setControlsDisabled(false);
   }
 }
 
