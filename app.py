@@ -88,6 +88,17 @@ def first_info(info):
     # python-chess may return a dict OR a list (multipv-style)
     return info[0] if isinstance(info, list) else info
 
+
+def get_best_move_uci(info, engine: chess.engine.SimpleEngine, board: chess.Board, depth: int):
+    pv = (info or {}).get("pv") or []
+    if pv:
+        return pv[0].uci()
+    if board.is_game_over():
+        return None
+    result = engine.play(board, chess.engine.Limit(depth=depth))
+    return result.move.uci() if result.move else None
+
+
 def load_eco_map(path="data/openings.csv"):
     """
     Builds ECO -> opening name from your CSV (headers: ECO, name, moves).
@@ -291,8 +302,7 @@ def opening_mistakes(username: str):
                 eval_before = score_to_pawns(score_before)
 
                 # Best move from BEFORE position
-                best_move_obj = engine.play(board, chess.engine.Limit(depth=depth)).move
-                best_move_uci = best_move_obj.uci()
+                best_move_uci = get_best_move_uci(info_before, engine, board, depth)
 
                 pv_moves = []
                 if "pv" in info_before:
@@ -307,8 +317,7 @@ def opening_mistakes(username: str):
                 eval_after = score_to_pawns(score_after)
 
                 # Opponent best reply (after mover played)
-                best_reply_obj = engine.play(board, chess.engine.Limit(depth=depth)).move
-                best_reply_uci = best_reply_obj.uci()
+                best_reply_uci = get_best_move_uci(info_after, engine, board, depth)
 
                 # ---- Drop FOR THE MOVER (correct sign for White/Black) ----
                 # eval is White POV. If mover is Black, invert.
