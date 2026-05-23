@@ -1,0 +1,9 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+
+# Local Stockfish binaries are large and platform-specific.
+engine/

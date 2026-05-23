@@ -1,4 +1,5 @@
 import { Chessground } from "https://unpkg.com/chessground@9.1.1/dist/chessground.min.js";
+
 let ground = null;
 
 function uciToArrow(uci) {
@@ -27,28 +28,24 @@ function setBoard(fen, playedUci, bestUci) {
   });
 }
 
-function itemHTML(title, meta) {
-  return `
-    <div class="item">
-      <div class="top">
-        <div>${title}</div>
-      </div>
-      <div class="meta">${meta}</div>
-    </div>
-  `;
+function renderEmpty(container) {
+  const empty = document.createElement("div");
+  empty.className = "meta";
+  empty.textContent = "No items yet.";
+  container.appendChild(empty);
 }
 
 function renderList(container, items, onClick) {
-  container.innerHTML = "";
+  container.replaceChildren();
   if (!items || items.length === 0) {
-    container.innerHTML = `<div class="meta">No items yet.</div>`;
+    renderEmpty(container);
     return;
   }
+
   items.forEach((it) => {
-    const title =
-      it.opening
-        ? `${it.opening} • ${it.mistake_type || it.label || "mistake"}`
-        : `${it.mistake_type || it.label || "mistake"}`;
+    const title = it.opening
+      ? `${it.opening} - ${it.mistake_type || it.label || "mistake"}`
+      : `${it.mistake_type || it.label || "mistake"}`;
 
     const meta = [
       it.move_number ? `Move ${it.move_number} (${it.side})` : (it.ply ? `ply ${it.ply}` : null),
@@ -56,11 +53,23 @@ function renderList(container, items, onClick) {
       it.best_move_uci ? `best ${it.best_move_uci}` : (it.recommended_move_uci ? `best ${it.recommended_move_uci}` : null),
       (it.drop_pawns != null) ? `drop ${it.drop_pawns}` : (it.avg_drop_pawns != null ? `avg drop ${it.avg_drop_pawns}` : null),
       (it.count != null) ? `count ${it.count}` : null,
-    ].filter(Boolean).join(" • ");
+    ].filter(Boolean).join(" - ");
 
-    const wrapper = document.createElement("div");
-    wrapper.innerHTML = itemHTML(title, meta);
-    const node = wrapper.firstElementChild;
+    const node = document.createElement("div");
+    node.className = "item";
+
+    const top = document.createElement("div");
+    top.className = "top";
+
+    const titleEl = document.createElement("div");
+    titleEl.textContent = title;
+
+    const metaEl = document.createElement("div");
+    metaEl.className = "meta";
+    metaEl.textContent = meta;
+
+    top.appendChild(titleEl);
+    node.append(top, metaEl);
     node.addEventListener("click", () => onClick(it));
     container.appendChild(node);
   });
@@ -73,14 +82,19 @@ async function analyze() {
   const depth = document.getElementById("depth").value;
 
   const status = document.getElementById("status");
-  status.textContent = "Analyzing… (leave the server running)";
+  if (!username) {
+    status.textContent = "Enter a Lichess username first.";
+    return;
+  }
+
+  status.textContent = "Analyzing... (leave the server running)";
 
   const url = `/lichess/${encodeURIComponent(username)}/opening_mistakes?max=${maxGames}&plies=${plies}&depth=${depth}`;
 
   try {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
     status.textContent = `Done. Analyzed ${data.analyzed_games} games.`;
 
@@ -88,7 +102,6 @@ async function analyze() {
     const mistakeList = document.getElementById("mistakeList");
     const details = document.getElementById("details");
 
-    // Flatten mistakes for "All mistakes"
     const all = [];
     for (const g of data.games || []) {
       for (const m of (g.mistakes || [])) {
@@ -100,7 +113,6 @@ async function analyze() {
     }
 
     renderList(recurringList, data.top_recurring_mistakes || [], (it) => {
-      // recurring items use recommended_move_uci + fen_before
       setBoard(it.fen_before, it.move_uci, it.recommended_move_uci);
       details.textContent =
         `Opening: ${it.opening}\n` +
@@ -127,7 +139,6 @@ async function analyze() {
         (it.pv_before ? `PV: ${it.pv_before.join(" ")}` : "");
     });
 
-    // Put something on the board initially
     if (all.length > 0) {
       setBoard(all[0].fen_before, all[0].move_uci, all[0].best_move_uci);
     }
@@ -137,7 +148,6 @@ async function analyze() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  // Initialize chessboard
   const el = document.getElementById("board");
   ground = Chessground(el, {
     fen: "start",

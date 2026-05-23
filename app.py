@@ -8,20 +8,45 @@ import lichess.api
 from lichess.format import SINGLE_PGN
 import csv
 import os
+import shutil
 
-STOCKFISH_PATH = "engine/stockfish.exe"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__)
 
 
 # ---------------------- Engine helpers ----------------------
+def resolve_stockfish_path():
+    configured_path = os.environ.get("STOCKFISH_PATH")
+    candidates = [
+        configured_path,
+        os.path.join(BASE_DIR, "engine", "stockfish.exe"),
+        os.path.join(BASE_DIR, "engine", "stockfish"),
+        shutil.which("stockfish"),
+        "/usr/games/stockfish",
+        "/usr/bin/stockfish",
+    ]
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if os.path.exists(candidate):
+            return candidate
+
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+
+    return None
+
+
 def load_eco_candidates(path="data/openings.csv"):
     """
     Returns dict: ECO -> list of {"name": str, "moves": str}
     CSV headers: ECO,name,moves
     """
     out = {}
-    abs_path = os.path.join(os.path.dirname(__file__), path)
+    abs_path = os.path.join(BASE_DIR, path)
     if not os.path.exists(abs_path):
         print("ECO CSV not found:", abs_path)
         return out
@@ -53,7 +78,7 @@ def load_eco_map(path="data/openings.csv"):
     import csv, os
 
     eco_map = {}
-    abs_path = os.path.join(os.path.dirname(__file__), path)
+    abs_path = os.path.join(BASE_DIR, path)
 
     if not os.path.exists(abs_path):
         print("ECO CSV not found:", abs_path)
@@ -168,7 +193,7 @@ def best_opening_name(game: chess.pgn.Game, eco: str) -> str:
 # ---------------------- Basic routes ----------------------
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "stockfish_found": bool(resolve_stockfish_path())}
 
 
 @app.get("/routes")
@@ -221,7 +246,13 @@ def opening_mistakes(username: str):
 
     results = []
 
-    with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+    stockfish_path = resolve_stockfish_path()
+    if not stockfish_path:
+        return jsonify({
+            "error": "Stockfish engine not found. Set STOCKFISH_PATH or place stockfish/stockfish.exe in the engine folder."
+        }), 500
+
+    with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
         for g in games:
             board = g.board()
             game_mistakes = []
@@ -361,4 +392,7 @@ def opening_mistakes(username: str):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    port = int(os.environ.get("PORT", "5000"))
+    debug = os.environ.get("FLASK_DEBUG", "1") == "1"
+    host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    app.run(host=host, port=port, debug=debug)
