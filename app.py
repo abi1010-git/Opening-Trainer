@@ -15,6 +15,7 @@ import time
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MAX_FILTER_SCAN_GAMES = int(os.environ.get("MAX_FILTER_SCAN_GAMES", "200"))
 
 app = Flask(__name__)
 JOBS = {}
@@ -398,6 +399,12 @@ def clamp_analysis_params(args):
     return max_games, plies, depth, time_mode, time_controls
 
 
+def fetch_limit_for_filter(max_games, time_mode, time_controls):
+    if time_mode == "all" or not time_controls:
+        return max_games
+    return min(MAX_FILTER_SCAN_GAMES, max(max_games, max_games * 10))
+
+
 def analyze_opening_mistakes(
     username: str,
     max_games: int,
@@ -415,26 +422,31 @@ def analyze_opening_mistakes(
             total_games=max_games,
             message="Fetching recent Lichess games",
         )
-    pgn = fetch_recent_pgn(username, max_games=max_games)
+    fetch_limit = fetch_limit_for_filter(max_games, time_mode, time_controls)
+    pgn = fetch_recent_pgn(username, max_games=fetch_limit)
     fetched_games = load_games(pgn)
     game_items = []
+    scanned_games = 0
     for original_index, game in enumerate(fetched_games, start=1):
+        scanned_games += 1
         game_context = player_game_context(game, username)
         if game_matches_time_filter(game_context, time_mode, time_controls):
             game_items.append((original_index, game, game_context))
+            if len(game_items) >= max_games:
+                break
 
     games = [item[1] for item in game_items]
     total_games = len(games)
-    skipped_games = len(fetched_games) - total_games
+    skipped_games = scanned_games - total_games
 
     results = []
 
     if progress_callback:
         if time_mode == "all":
-            message = f"Fetched {len(fetched_games)} games"
+            message = f"Found {total_games} games to analyze"
         else:
             controls_label = ", ".join(time_controls)
-            message = f"Matched {total_games} of {len(fetched_games)} games for {time_mode} {controls_label}"
+            message = f"Matched {total_games} of {scanned_games} scanned games for {time_mode} {controls_label}"
         progress_callback(
             state="filtering",
             current_game=0,
@@ -442,15 +454,13 @@ def analyze_opening_mistakes(
             message=message,
         )
 
-    stockfish_path = resolve_stockfish_path()
-    if not stockfish_path:
-        raise RuntimeError("Stockfish engine not found. Set STOCKFISH_PATH or place stockfish/stockfish.exe in the engine folder.")
-
     if total_games == 0:
         return {
             "username": username,
+            "requested_games": max_games,
             "analyzed_games": 0,
-            "fetched_games": len(fetched_games),
+            "fetched_games": scanned_games,
+            "scanned_games": scanned_games,
             "skipped_games": skipped_games,
             "total_mistakes": 0,
             "recurring_mistake_count": 0,
@@ -464,6 +474,10 @@ def analyze_opening_mistakes(
             "top_recurring_mistakes": [],
             "games": [],
         }
+
+    stockfish_path = resolve_stockfish_path()
+    if not stockfish_path:
+        raise RuntimeError("Stockfish engine not found. Set STOCKFISH_PATH or place stockfish/stockfish.exe in the engine folder.")
 
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
         for game_number, (_, g, game_context) in enumerate(game_items, start=1):
@@ -663,8 +677,10 @@ def analyze_opening_mistakes(
 
     return {
         "username": username,
+        "requested_games": max_games,
         "analyzed_games": len(games),
-        "fetched_games": len(fetched_games),
+        "fetched_games": scanned_games,
+        "scanned_games": scanned_games,
         "skipped_games": skipped_games,
         "total_mistakes": total_mistakes,
         "recurring_mistake_count": len(recurring),

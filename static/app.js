@@ -77,8 +77,9 @@ function renderSummary(data, mistakes) {
 
   const stats = [
     ["Player", data.username],
+    ["Target", data.requested_games ?? data.params?.max ?? data.analyzed_games],
     ["Analyzed", data.analyzed_games],
-    ["Fetched", data.fetched_games ?? data.analyzed_games],
+    ["Scanned", data.scanned_games ?? data.fetched_games ?? data.analyzed_games],
     ["Skipped", data.skipped_games ?? 0],
     ["Mistakes", data.total_mistakes ?? mistakes.length],
     ["Recurring", data.recurring_mistake_count ?? (data.top_recurring_mistakes || []).length],
@@ -290,7 +291,8 @@ async function pollAnalysisJob(jobId) {
     setProgress(percent, job.message || "Analyzing games", detail);
 
     if (job.state === "complete") {
-      setProgress(100, "Analysis complete", `${job.result.analyzed_games} games analyzed`);
+      const skipped = job.result.skipped_games ? `, ${job.result.skipped_games} skipped` : "";
+      setProgress(100, "Analysis complete", `${job.result.analyzed_games} games analyzed${skipped}`);
       return job.result;
     }
 
