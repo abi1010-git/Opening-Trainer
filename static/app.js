@@ -75,6 +75,23 @@ function renderList(container, items, onClick) {
   });
 }
 
+async function parseApiResponse(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  const text = await res.text();
+  const title = text.match(/<title>(.*?)<\/title>/i)?.[1]?.trim();
+  const preview = title || text.replace(/\s+/g, " ").slice(0, 120);
+  throw new Error(
+    `The analysis server returned a web page instead of data (${res.status}). ` +
+    `${preview}. Use the Flask/Render app URL, not GitHub Pages or a raw HTML file.`
+  );
+}
+
 async function analyze() {
   const username = document.getElementById("username").value.trim();
   const maxGames = document.getElementById("maxGames").value;
@@ -93,8 +110,7 @@ async function analyze() {
 
   try {
     const res = await fetch(url);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const data = await parseApiResponse(res);
 
     status.textContent = `Done. Analyzed ${data.analyzed_games} games.`;
 

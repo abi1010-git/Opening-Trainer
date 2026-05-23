@@ -1,5 +1,6 @@
 from collections import Counter
 from flask import Flask, jsonify, request, render_template
+from werkzeug.exceptions import HTTPException
 import chess
 import chess.pgn
 import chess.engine
@@ -13,6 +14,24 @@ import shutil
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__)
+
+
+@app.errorhandler(Exception)
+def handle_error(error):
+    if not request.path.startswith("/lichess/"):
+        if isinstance(error, HTTPException):
+            return error
+        raise error
+
+    if isinstance(error, HTTPException):
+        status_code = error.code or 500
+        message = error.description
+    else:
+        status_code = 500
+        message = str(error) or "Unexpected server error"
+        app.logger.exception("Unhandled analysis error")
+
+    return jsonify({"error": message}), status_code
 
 
 # ---------------------- Engine helpers ----------------------
