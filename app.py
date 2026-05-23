@@ -99,6 +99,18 @@ def get_best_move_uci(info, engine: chess.engine.SimpleEngine, board: chess.Boar
     return result.move.uci() if result.move else None
 
 
+def move_san_from_uci(board: chess.Board, uci: str | None) -> str | None:
+    if not uci:
+        return None
+    try:
+        move = chess.Move.from_uci(uci)
+        if move in board.legal_moves:
+            return board.san(move)
+    except ValueError:
+        return None
+    return None
+
+
 def load_eco_map(path="data/openings.csv"):
     """
     Builds ECO -> opening name from your CSV (headers: ECO, name, moves).
@@ -259,6 +271,30 @@ def is_players_turn(game, username: str, board: chess.Board) -> bool:
     return (board.turn == chess.WHITE and white == u) or (board.turn == chess.BLACK and black == u)
 
 
+def player_game_context(game, username: str):
+    white = game.headers.get("White") or "Unknown"
+    black = game.headers.get("Black") or "Unknown"
+    if white.lower() == username.lower():
+        user_color = "White"
+        opponent = black
+    elif black.lower() == username.lower():
+        user_color = "Black"
+        opponent = white
+    else:
+        user_color = "Unknown"
+        opponent = f"{white} / {black}"
+
+    return {
+        "white": white,
+        "black": black,
+        "opponent": opponent,
+        "user_color": user_color,
+        "result": game.headers.get("Result"),
+        "date": game.headers.get("UTCDate") or game.headers.get("Date"),
+        "site": game.headers.get("Site"),
+    }
+
+
 # ---------------------- Main endpoint ----------------------
 @app.get("/lichess/<username>/opening_mistakes")
 def opening_mistakes(username: str):
@@ -283,9 +319,10 @@ def opening_mistakes(username: str):
         }), 500
 
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
-        for g in games:
+        for game_number, g in enumerate(games, start=1):
             board = g.board()
             game_mistakes = []
+            game_context = player_game_context(g, username)
 
             for ply, move in enumerate(g.mainline_moves(), start=1):
                 if ply > plies:
@@ -294,6 +331,8 @@ def opening_mistakes(username: str):
                 # Who is about to move (the mover)
                 players_turn = is_players_turn(g, username, board)
                 mover_color = board.turn
+                move_number = board.fullmove_number
+                move_san = board.san(move)
                 fen_before = board.fen()
 
                 # ---- Evaluate BEFORE the move ----
@@ -303,6 +342,7 @@ def opening_mistakes(username: str):
 
                 # Best move from BEFORE position
                 best_move_uci = get_best_move_uci(info_before, engine, board, depth)
+                best_move_san = move_san_from_uci(board, best_move_uci)
 
                 pv_moves = []
                 if "pv" in info_before:
@@ -318,6 +358,7 @@ def opening_mistakes(username: str):
 
                 # Opponent best reply (after mover played)
                 best_reply_uci = get_best_move_uci(info_after, engine, board, depth)
+                best_reply_san = move_san_from_uci(board, best_reply_uci)
 
                 # ---- Drop FOR THE MOVER (correct sign for White/Black) ----
                 # eval is White POV. If mover is Black, invert.
@@ -334,10 +375,16 @@ def opening_mistakes(username: str):
                 # ---- Record only mistakes made by the USER ----
                 if players_turn and mistake_type != "ok":
                     game_mistakes.append({
+                        "game_number": game_number,
                         "ply": ply,
+                        "move_number": move_number,
+                        "side": "White" if mover_color == chess.WHITE else "Black",
                         "move_uci": move.uci(),
+                        "move_san": move_san,
                         "best_move_uci": best_move_uci,
+                        "best_move_san": best_move_san,
                         "best_reply_uci": best_reply_uci,
+                        "best_reply_san": best_reply_san,
                         "drop_pawns": round(drop_for_mover, 2),
                         "mistake_type": mistake_type,
                         "eval_before": round(eval_before, 2),
@@ -350,9 +397,8 @@ def opening_mistakes(username: str):
             opening = best_opening_name(g, eco)
 
             results.append({
-                "white": g.headers.get("White"),
-                "black": g.headers.get("Black"),
-                "result": g.headers.get("Result"),
+                "game_number": game_number,
+                **game_context,
                 "eco": eco,
                 "opening": opening,
                 "mistakes": game_mistakes,
@@ -378,6 +424,8 @@ def opening_mistakes(username: str):
                     "types": Counter(),
                     "best_moves": Counter(),
                     "best_replies": Counter(),
+                    "opponents": Counter(),
+                    "examples": [],
                     "example": m,
                 }
 
@@ -386,6 +434,26 @@ def opening_mistakes(username: str):
             agg[key]["types"][m.get("mistake_type", "unknown")] += 1
             agg[key]["best_moves"][m.get("best_move_uci")] += 1
             agg[key]["best_replies"][m.get("best_reply_uci")] += 1
+            agg[key]["opponents"][game.get("opponent")] += 1
+            if len(agg[key]["examples"]) < 3:
+                agg[key]["examples"].append({
+                    "game_number": m.get("game_number"),
+                    "white": game.get("white"),
+                    "black": game.get("black"),
+                    "opponent": game.get("opponent"),
+                    "user_color": game.get("user_color"),
+                    "result": game.get("result"),
+                    "date": game.get("date"),
+                    "site": game.get("site"),
+                    "move_number": m.get("move_number"),
+                    "side": m.get("side"),
+                    "move_san": m.get("move_san"),
+                    "move_uci": m.get("move_uci"),
+                    "best_move_san": m.get("best_move_san"),
+                    "best_move_uci": m.get("best_move_uci"),
+                    "drop_pawns": m.get("drop_pawns"),
+                    "mistake_type": m.get("mistake_type"),
+                })
 
     recurring = []
     for v in agg.values():
@@ -393,26 +461,36 @@ def opening_mistakes(username: str):
         common_type = v["types"].most_common(1)[0][0] if v["types"] else None
         recommended = v["best_moves"].most_common(1)[0][0] if v["best_moves"] else None
         best_reply = v["best_replies"].most_common(1)[0][0] if v["best_replies"] else None
+        common_opponent = v["opponents"].most_common(1)[0][0] if v["opponents"] else None
 
         recurring.append({
             "opening": v["opening"],
             "eco": v["eco"],
             "fen_before": v["fen_before"],
             "move_uci": v["move_uci"],
+            "move_san": v["example"].get("move_san") if v["example"] else None,
             "count": v["count"],
             "avg_drop_pawns": round(avg_drop, 2),
             "mistake_type": common_type,
             "recommended_move_uci": recommended,
+            "recommended_move_san": v["example"].get("best_move_san") if v["example"] else None,
             "opponent_best_reply_uci": best_reply,
+            "opponent_best_reply_san": v["example"].get("best_reply_san") if v["example"] else None,
+            "common_opponent": common_opponent,
+            "examples": v["examples"],
             "pv_before": v["example"].get("pv_before") if v["example"] else None,
         })
 
     recurring.sort(key=lambda x: (x["count"], x["avg_drop_pawns"]), reverse=True)
     top_recurring = recurring[:10]
 
+    total_mistakes = sum(len(game.get("mistakes", [])) for game in results)
+
     return jsonify({
         "username": username,
         "analyzed_games": len(games),
+        "total_mistakes": total_mistakes,
+        "recurring_mistake_count": len(recurring),
         "params": {"max": max_games, "plies": plies, "depth": depth},
         "top_recurring_mistakes": top_recurring,
         "games": results,

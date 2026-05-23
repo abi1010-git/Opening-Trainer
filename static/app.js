@@ -28,50 +28,193 @@ function setBoard(fen, playedUci, bestUci) {
   });
 }
 
-function renderEmpty(container) {
-  const empty = document.createElement("div");
-  empty.className = "meta";
-  empty.textContent = "No items yet.";
-  container.appendChild(empty);
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
 }
 
-function renderList(container, items, onClick) {
+function formatType(type) {
+  return (type || "mistake").replace(":", " ");
+}
+
+function formatMove(san, uci) {
+  if (san && uci) return `${san} (${uci})`;
+  return san || uci || "n/a";
+}
+
+function plural(count, singular, pluralLabel = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralLabel}`;
+}
+
+function resultForUser(result, userColor) {
+  if (result === "1/2-1/2") return "Draw";
+  if (result === "1-0") return userColor === "White" ? "Win" : "Loss";
+  if (result === "0-1") return userColor === "Black" ? "Win" : "Loss";
+  return result || "Unknown result";
+}
+
+function gameLine(item) {
+  const player = item.user_color === "White" ? item.white : item.user_color === "Black" ? item.black : "Player";
+  return `Game ${item.game_number || "?"}: ${item.white || "White"} vs ${item.black || "Black"} - ` +
+    `${player} as ${item.user_color || item.side || "player"} - ` +
+    `${resultForUser(item.result, item.user_color)}`;
+}
+
+function renderEmpty(container, message) {
+  container.replaceChildren(el("div", "empty", message));
+}
+
+function renderSummary(data, mistakes) {
+  const summary = document.getElementById("summary");
+  summary.replaceChildren();
+
+  const stats = [
+    ["Player", data.username],
+    ["Games", data.analyzed_games],
+    ["Mistakes", data.total_mistakes ?? mistakes.length],
+    ["Recurring", data.recurring_mistake_count ?? (data.top_recurring_mistakes || []).length],
+  ];
+
+  for (const [label, value] of stats) {
+    const item = el("div", "summaryItem");
+    item.append(el("span", "summaryLabel", label), el("strong", null, value));
+    summary.appendChild(item);
+  }
+}
+
+function selectCard(card) {
+  document.querySelectorAll(".item.selected").forEach((node) => node.classList.remove("selected"));
+  card.classList.add("selected");
+}
+
+function detailRow(label, value) {
+  const row = el("div", "detailRow");
+  row.append(el("span", "detailLabel", label), el("span", "detailValue", value || "n/a"));
+  return row;
+}
+
+function renderDetails(item, isRecurring = false) {
+  const details = document.getElementById("details");
+  details.replaceChildren();
+
+  const title = isRecurring
+    ? `${item.opening || item.eco || "Unknown opening"} - ${plural(item.count || 0, "time")}`
+    : `${item.opening || item.eco || "Unknown opening"} - ${formatType(item.mistake_type)}`;
+
+  details.appendChild(el("div", "detailsTitle", title));
+
+  const grid = el("div", "detailGrid");
+  if (isRecurring) {
+    const example = (item.examples || [])[0] || {};
+    grid.append(
+      detailRow("Count", plural(item.count || 0, "time")),
+      detailRow("Avg drop", `${item.avg_drop_pawns ?? "n/a"} pawns`),
+      detailRow("Played", formatMove(item.move_san, item.move_uci)),
+      detailRow("Recommended", formatMove(item.recommended_move_san, item.recommended_move_uci)),
+      detailRow("Common opponent", item.common_opponent),
+      detailRow("Example", gameLine(example))
+    );
+  } else {
+    grid.append(
+      detailRow("Game", gameLine(item)),
+      detailRow("Move", `${item.move_number || "?"} as ${item.side || item.user_color || "player"}`),
+      detailRow("Played", formatMove(item.move_san, item.move_uci)),
+      detailRow("Recommended", formatMove(item.best_move_san, item.best_move_uci)),
+      detailRow("Opponent reply", formatMove(item.best_reply_san, item.best_reply_uci)),
+      detailRow("Drop", `${item.drop_pawns ?? "n/a"} pawns`),
+      detailRow("Eval before", item.eval_before),
+      detailRow("Eval after", item.eval_after)
+    );
+  }
+  details.appendChild(grid);
+
+  const pv = item.pv_before;
+  if (pv && pv.length) {
+    const pvLine = el("div", "pvLine", `PV: ${pv.join(" ")}`);
+    details.appendChild(pvLine);
+  }
+}
+
+function renderRecurring(container, items) {
   container.replaceChildren();
   if (!items || items.length === 0) {
-    renderEmpty(container);
+    renderEmpty(container, "No recurring mistakes found.");
     return;
   }
 
-  items.forEach((it) => {
-    const title = it.opening
-      ? `${it.opening} - ${it.mistake_type || it.label || "mistake"}`
-      : `${it.mistake_type || it.label || "mistake"}`;
+  items.forEach((item) => {
+    const card = el("button", "item", null);
+    card.type = "button";
 
-    const meta = [
-      it.move_number ? `Move ${it.move_number} (${it.side})` : (it.ply ? `ply ${it.ply}` : null),
-      `played ${it.move_uci}`,
-      it.best_move_uci ? `best ${it.best_move_uci}` : (it.recommended_move_uci ? `best ${it.recommended_move_uci}` : null),
-      (it.drop_pawns != null) ? `drop ${it.drop_pawns}` : (it.avg_drop_pawns != null ? `avg drop ${it.avg_drop_pawns}` : null),
-      (it.count != null) ? `count ${it.count}` : null,
-    ].filter(Boolean).join(" - ");
+    const head = el("div", "itemHead");
+    const titleBlock = el("div", "itemTitleBlock");
+    titleBlock.append(
+      el("div", "itemTitle", item.opening || item.eco || "Unknown opening"),
+      el("div", "itemSub", `${formatType(item.mistake_type)} - ${item.common_opponent ? `often vs ${item.common_opponent}` : "opening position"}`)
+    );
 
-    const node = document.createElement("div");
-    node.className = "item";
+    const count = el("div", "countBadge");
+    count.append(el("strong", null, item.count ?? 0), el("span", null, item.count === 1 ? "time" : "times"));
+    head.append(titleBlock, count);
 
-    const top = document.createElement("div");
-    top.className = "top";
+    const stats = el("div", "statRow");
+    stats.append(
+      el("span", "stat danger", `avg drop ${item.avg_drop_pawns}`),
+      el("span", "stat", `played ${formatMove(item.move_san, item.move_uci)}`),
+      el("span", "stat good", `best ${formatMove(item.recommended_move_san, item.recommended_move_uci)}`)
+    );
 
-    const titleEl = document.createElement("div");
-    titleEl.textContent = title;
+    const example = (item.examples || [])[0];
+    if (example) card.append(head, stats, el("div", "gameMeta", gameLine(example)));
+    else card.append(head, stats);
 
-    const metaEl = document.createElement("div");
-    metaEl.className = "meta";
-    metaEl.textContent = meta;
+    card.addEventListener("click", () => {
+      selectCard(card);
+      setBoard(item.fen_before, item.move_uci, item.recommended_move_uci);
+      renderDetails(item, true);
+    });
+    container.appendChild(card);
+  });
+}
 
-    top.appendChild(titleEl);
-    node.append(top, metaEl);
-    node.addEventListener("click", () => onClick(it));
-    container.appendChild(node);
+function renderMistakes(container, items) {
+  container.replaceChildren();
+  if (!items || items.length === 0) {
+    renderEmpty(container, "No opening mistakes found for this player.");
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = el("button", "item", null);
+    card.type = "button";
+
+    const head = el("div", "itemHead");
+    const titleBlock = el("div", "itemTitleBlock");
+    titleBlock.append(
+      el("div", "itemTitle", `${item.opening || item.eco || "Unknown opening"} - ${formatType(item.mistake_type)}`),
+      el("div", "itemSub", gameLine(item))
+    );
+
+    const moveBadge = el("div", "moveBadge");
+    moveBadge.append(el("span", null, "Move"), el("strong", null, item.move_number || "?"));
+    head.append(titleBlock, moveBadge);
+
+    const stats = el("div", "statRow");
+    stats.append(
+      el("span", "stat", `played ${formatMove(item.move_san, item.move_uci)}`),
+      el("span", "stat good", `best ${formatMove(item.best_move_san, item.best_move_uci)}`),
+      el("span", "stat danger", `drop ${item.drop_pawns}`)
+    );
+
+    card.append(head, stats);
+    card.addEventListener("click", () => {
+      selectCard(card);
+      setBoard(item.fen_before, item.move_uci, item.best_move_uci);
+      renderDetails(item);
+    });
+    container.appendChild(card);
   });
 }
 
@@ -112,51 +255,35 @@ async function analyze() {
     const res = await fetch(url);
     const data = await parseApiResponse(res);
 
-    status.textContent = `Done. Analyzed ${data.analyzed_games} games.`;
-
-    const recurringList = document.getElementById("recurringList");
-    const mistakeList = document.getElementById("mistakeList");
-    const details = document.getElementById("details");
-
     const all = [];
     for (const g of data.games || []) {
       for (const m of (g.mistakes || [])) {
         all.push({
           ...m,
           opening: g.opening || g.eco || "Unknown",
+          eco: g.eco,
+          white: g.white,
+          black: g.black,
+          opponent: g.opponent,
+          user_color: g.user_color,
+          result: g.result,
+          date: g.date,
+          site: g.site,
         });
       }
     }
 
-    renderList(recurringList, data.top_recurring_mistakes || [], (it) => {
-      setBoard(it.fen_before, it.move_uci, it.recommended_move_uci);
-      details.textContent =
-        `Opening: ${it.opening}\n` +
-        `Played: ${it.move_uci}\n` +
-        `Recommended: ${it.recommended_move_uci}\n` +
-        `Count: ${it.count}\n` +
-        `Avg drop: ${it.avg_drop_pawns}\n` +
-        (it.pv_before ? `PV: ${it.pv_before.join(" ")}` : "");
-    });
+    status.textContent = `Done. ${data.username} made ${plural(all.length, "opening mistake")} in ${plural(data.analyzed_games, "game")}.`;
+    renderSummary(data, all);
+    renderRecurring(document.getElementById("recurringList"), data.top_recurring_mistakes || []);
+    renderMistakes(document.getElementById("mistakeList"), all);
 
-    renderList(mistakeList, all, (it) => {
-      setBoard(it.fen_before, it.move_uci, it.best_move_uci);
-      details.textContent =
-        `Opening: ${it.opening}\n` +
-        `ply: ${it.ply}\n` +
-        `Played: ${it.move_uci}\n` +
-        `Recommended: ${it.best_move_uci}\n` +
-        `Best reply: ${it.best_reply_uci}\n` +
-        `Type: ${it.mistake_type}\n` +
-        `Eval before: ${it.eval_before}\n` +
-        `Eval after: ${it.eval_after}\n` +
-        `Drop: ${it.drop_pawns}\n` +
-        (it.mate_after != null ? `Mate after: ${it.mate_after}\n` : "") +
-        (it.pv_before ? `PV: ${it.pv_before.join(" ")}` : "");
-    });
-
-    if (all.length > 0) {
-      setBoard(all[0].fen_before, all[0].move_uci, all[0].best_move_uci);
+    const first = all[0];
+    if (first) {
+      setBoard(first.fen_before, first.move_uci, first.best_move_uci);
+      renderDetails(first);
+    } else {
+      document.getElementById("details").textContent = "No mistakes found for this player.";
     }
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
