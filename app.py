@@ -9,9 +9,11 @@ import lichess.api
 from lichess.format import SINGLE_PGN
 import csv
 import os
+import requests
 import shutil
 import threading
 import time
+from urllib.parse import quote
 import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,14 @@ app = Flask(__name__)
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 JOB_TTL_SECONDS = 60 * 60
+
+
+class LichessUserNotFound(ValueError):
+    pass
+
+
+class LichessRequestError(RuntimeError):
+    pass
 
 
 @app.errorhandler(Exception)
@@ -33,6 +43,12 @@ def handle_error(error):
     if isinstance(error, HTTPException):
         status_code = error.code or 500
         message = error.description
+    elif isinstance(error, LichessUserNotFound):
+        status_code = 404
+        message = str(error)
+    elif isinstance(error, LichessRequestError):
+        status_code = 502
+        message = str(error)
     else:
         status_code = 500
         message = str(error) or "Unexpected server error"
@@ -273,8 +289,54 @@ def home():
 
 
 # ---------------------- Lichess helpers ----------------------
+def verify_lichess_user(username: str) -> str:
+    username = (username or "").strip()
+    if not username:
+        raise LichessUserNotFound("Enter a Lichess username first.")
+
+    url = f"https://lichess.org/api/user/{quote(username, safe='')}"
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "lichess-opening-coach",
+            },
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise LichessRequestError(
+            "Could not reach Lichess to check that player. Try again in a minute."
+        ) from exc
+
+    if response.status_code == 404:
+        raise LichessUserNotFound(
+            f'Lichess player "{username}" was not found. Check the spelling or use the Lichess player database link.'
+        )
+
+    if response.status_code == 429:
+        raise LichessRequestError("Lichess is rate-limiting requests. Try again in a minute.")
+
+    if response.status_code >= 400:
+        raise LichessRequestError(
+            f"Lichess returned HTTP {response.status_code} while checking that player."
+        )
+
+    try:
+        profile = response.json()
+    except ValueError:
+        profile = {}
+
+    return profile.get("username") or username
+
+
 def fetch_recent_pgn(username: str, max_games: int = 5) -> str:
-    return lichess.api.user_games(username, max=max_games, format=SINGLE_PGN)
+    try:
+        return lichess.api.user_games(username, max=max_games, format=SINGLE_PGN)
+    except Exception as exc:
+        raise LichessRequestError(
+            "Could not fetch games from Lichess for that player. Try again in a minute."
+        ) from exc
 
 
 def load_games(pgn_text: str):
@@ -415,6 +477,7 @@ def analyze_opening_mistakes(
     progress_callback=None,
 ):
     time_controls = time_controls or []
+    username = verify_lichess_user(username)
     if progress_callback:
         progress_callback(
             state="fetching",
@@ -750,6 +813,8 @@ def start_opening_mistakes_job(username: str):
                 progress_percent=100,
                 result=result,
             )
+        except (LichessUserNotFound, LichessRequestError) as exc:
+            set_job_status(job_id, state="error", error=str(exc), progress_percent=100)
         except Exception as exc:
             app.logger.exception("Analysis job failed")
             set_job_status(job_id, state="error", error=str(exc) or "Analysis failed", progress_percent=100)

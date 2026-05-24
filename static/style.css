@@ -99,6 +99,24 @@ body {
   background: var(--blue-dark);
 }
 
+.resourceLinks {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.resourceLinks a {
+  color: var(--blue-dark);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.resourceLinks a:hover {
+  text-decoration: underline;
+}
+
 .status {
   min-height: 24px;
   margin-top: 12px;
