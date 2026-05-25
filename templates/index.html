@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Lichess Opening Coach</title>
+    <title>Repeated Mistakes Made in Chess Openings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <!-- Chessground (board + arrows) -->
@@ -15,7 +15,7 @@
   <body>
     <div class="wrap">
       <header class="header">
-        <h1>Lichess Opening Coach</h1>
+        <h1>Repeated Mistakes Made in Chess Openings</h1>
         <div class="controls">
           <input id="username" placeholder="Lichess username" />
           <label>Games <input id="maxGames" type="number" value="10" min="1" max="50" /></label>
@@ -55,6 +55,17 @@
           <div class="legend">
             <span class="dot red"></span> Played move (red)
             <span class="dot green"></span> Recommended (green)
+          </div>
+
+          <div id="moveViewer" class="moveViewer" hidden>
+            <div class="moveViewerTop">
+              <button id="prevMoveBtn" type="button">Prev</button>
+              <label for="moveSelect">Move</label>
+              <select id="moveSelect"></select>
+              <button id="nextMoveBtn" type="button">Next</button>
+            </div>
+            <input id="moveSlider" class="moveSlider" type="range" min="0" max="0" value="0" />
+            <div id="moveViewerMeta" class="moveViewerMeta"></div>
           </div>
 
           <div id="details" class="details">Click a mistake to see it on the board.</div>

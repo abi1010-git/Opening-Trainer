@@ -450,6 +450,39 @@ def player_game_context(game, username: str):
     }
 
 
+def game_move_history(game: chess.pgn.Game):
+    board = game.board()
+    history = [{
+        "index": 0,
+        "ply": 0,
+        "label": "Start",
+        "fen": board.fen(),
+        "move_number": None,
+        "side": None,
+        "move_san": None,
+        "move_uci": None,
+    }]
+
+    for ply, move in enumerate(game.mainline_moves(), start=1):
+        side = "White" if board.turn == chess.WHITE else "Black"
+        move_number = board.fullmove_number
+        move_san = board.san(move)
+        move_uci = move.uci()
+        board.push(move)
+        history.append({
+            "index": ply,
+            "ply": ply,
+            "label": f"{move_number}. {move_san}" if side == "White" else f"{move_number}... {move_san}",
+            "fen": board.fen(),
+            "move_number": move_number,
+            "side": side,
+            "move_san": move_san,
+            "move_uci": move_uci,
+        })
+
+    return history
+
+
 def clamp_analysis_params(args):
     max_games = int(args.get("max", "10"))
     plies = int(args.get("plies", "12"))
@@ -545,6 +578,7 @@ def analyze_opening_mistakes(
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
         for game_number, (_, g, game_context) in enumerate(game_items, start=1):
             board = g.board()
+            move_history = game_move_history(g)
             game_mistakes = []
             if progress_callback:
                 progress_callback(
@@ -609,6 +643,7 @@ def analyze_opening_mistakes(
                     game_mistakes.append({
                         "game_number": game_number,
                         "ply": ply,
+                        "history_index": ply - 1,
                         "move_number": move_number,
                         "side": "White" if mover_color == chess.WHITE else "Black",
                         "move_uci": move.uci(),
@@ -633,6 +668,7 @@ def analyze_opening_mistakes(
                 **game_context,
                 "eco": eco,
                 "opening": opening,
+                "move_history": move_history,
                 "mistakes": game_mistakes,
             })
             if progress_callback:
@@ -697,6 +733,7 @@ def analyze_opening_mistakes(
                     "event": game.get("event"),
                     "time_control": game.get("time_control"),
                     "time_control_raw": game.get("time_control_raw"),
+                    "history_index": m.get("history_index"),
                     "move_number": m.get("move_number"),
                     "side": m.get("side"),
                     "move_san": m.get("move_san"),

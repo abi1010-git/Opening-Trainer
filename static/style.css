@@ -254,6 +254,66 @@ body {
   background: #24d070;
 }
 
+.moveViewer {
+  margin-top: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 12px;
+}
+
+.moveViewerTop {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.moveViewerTop label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.moveViewerTop button,
+.moveViewerTop select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+}
+
+.moveViewerTop button {
+  min-width: 58px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.moveViewerTop button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.moveViewerTop select {
+  width: 100%;
+  padding: 7px 9px;
+}
+
+.moveSlider {
+  width: 100%;
+  margin: 12px 0 0;
+}
+
+.moveViewerMeta {
+  min-height: 18px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .details {
   margin-top: 14px;
   background: var(--panel-soft);
@@ -434,5 +494,14 @@ body {
 
   .board {
     max-width: none;
+  }
+
+  .moveViewerTop {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .moveViewerTop label,
+  .moveViewerTop select {
+    grid-column: 1 / -1;
   }
 }

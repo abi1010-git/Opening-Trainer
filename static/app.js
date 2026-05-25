@@ -1,6 +1,8 @@
 import { Chessground } from "https://unpkg.com/chessground@9.1.1/dist/chessground.min.js";
 
 let ground = null;
+let gameIndex = new Map();
+let currentReview = null;
 
 function uciToArrow(uci) {
   if (!uci || uci.length < 4) return null;
@@ -26,6 +28,84 @@ function setBoard(fen, playedUci, bestUci) {
       autoShapes: shapes,
     },
   });
+}
+
+function hideMoveViewer() {
+  currentReview = null;
+  const viewer = document.getElementById("moveViewer");
+  if (viewer) viewer.hidden = true;
+}
+
+function reviewSource(item, isRecurring = false) {
+  const example = isRecurring ? ((item.examples || [])[0] || {}) : item;
+  const gameNumber = example.game_number || item.game_number;
+  const game = gameIndex.get(Number(gameNumber)) || gameIndex.get(gameNumber);
+  const history = game?.move_history || [];
+  const mistakeIndex = Number(example.history_index ?? item.history_index ?? 0) || 0;
+  const bestUci = item.best_move_uci || item.recommended_move_uci ||
+    example.best_move_uci || example.recommended_move_uci;
+
+  return {
+    history,
+    mistakeIndex,
+    playedUci: item.move_uci || example.move_uci,
+    bestUci,
+    fallbackFen: item.fen_before || example.fen_before,
+    gameDescription: game ? gameLine(game) : gameLine(example),
+  };
+}
+
+function showHistoryPosition(index) {
+  if (!currentReview || !currentReview.history.length) return;
+
+  const history = currentReview.history;
+  const safeIndex = Math.max(0, Math.min(history.length - 1, Number(index) || 0));
+  const position = history[safeIndex];
+  const onMistake = safeIndex === currentReview.mistakeIndex;
+
+  currentReview.positionIndex = safeIndex;
+  document.getElementById("moveSelect").value = String(safeIndex);
+  document.getElementById("moveSlider").value = String(safeIndex);
+  document.getElementById("prevMoveBtn").disabled = safeIndex <= 0;
+  document.getElementById("nextMoveBtn").disabled = safeIndex >= history.length - 1;
+
+  setBoard(
+    position.fen,
+    onMistake ? currentReview.playedUci : null,
+    onMistake ? currentReview.bestUci : null
+  );
+
+  const moveText = safeIndex === 0 ? "Start position" : `After ${position.label}`;
+  const arrowText = onMistake ? " - arrows show played vs recommended" : "";
+  document.getElementById("moveViewerMeta").textContent =
+    `${moveText} - ${currentReview.gameDescription}${arrowText}`;
+}
+
+function renderMoveViewer(item, isRecurring = false) {
+  const viewer = document.getElementById("moveViewer");
+  const select = document.getElementById("moveSelect");
+  const slider = document.getElementById("moveSlider");
+  const source = reviewSource(item, isRecurring);
+
+  if (!source.history.length) {
+    hideMoveViewer();
+    if (source.fallbackFen) setBoard(source.fallbackFen, source.playedUci, source.bestUci);
+    return;
+  }
+
+  select.replaceChildren();
+  source.history.forEach((position, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = position.label || `Move ${index}`;
+    select.appendChild(option);
+  });
+
+  currentReview = source;
+  viewer.hidden = false;
+  slider.min = "0";
+  slider.max = String(source.history.length - 1);
+  showHistoryPosition(source.mistakeIndex);
 }
 
 function el(tag, className, text) {
@@ -183,7 +263,7 @@ function renderRecurring(container, items) {
 
     card.addEventListener("click", () => {
       selectCard(card);
-      setBoard(item.fen_before, item.move_uci, item.recommended_move_uci);
+      renderMoveViewer(item, true);
       renderDetails(item, true);
     });
     container.appendChild(card);
@@ -222,7 +302,7 @@ function renderMistakes(container, items) {
     card.append(head, stats);
     card.addEventListener("click", () => {
       selectCard(card);
-      setBoard(item.fen_before, item.move_uci, item.best_move_uci);
+      renderMoveViewer(item);
       renderDetails(item);
     });
     container.appendChild(card);
@@ -326,6 +406,8 @@ async function analyze() {
   setProgress(0, "Loading...", "Preparing analysis");
   setControlsDisabled(true);
   document.getElementById("summary").replaceChildren();
+  gameIndex = new Map();
+  hideMoveViewer();
   renderEmpty(document.getElementById("recurringList"), "Analysis is running.");
   renderEmpty(document.getElementById("mistakeList"), "Analysis is running.");
   document.getElementById("details").textContent = "Analysis is running. The board will update when mistakes are found.";
@@ -345,6 +427,7 @@ async function analyze() {
     const data = await pollAnalysisJob(started.job_id);
 
     const all = [];
+    gameIndex = new Map((data.games || []).map((game) => [Number(game.game_number), game]));
     for (const g of data.games || []) {
       for (const m of (g.mistakes || [])) {
         all.push({
@@ -373,11 +456,13 @@ async function analyze() {
 
     const first = all[0];
     if (first) {
-      setBoard(first.fen_before, first.move_uci, first.best_move_uci);
+      renderMoveViewer(first);
       renderDetails(first);
     } else if (data.analyzed_games === 0) {
+      hideMoveViewer();
       document.getElementById("details").textContent = "No games matched this time-control filter.";
     } else {
+      hideMoveViewer();
       document.getElementById("details").textContent = "No mistakes found for this player.";
     }
   } catch (e) {
@@ -398,4 +483,16 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   document.getElementById("analyzeBtn").addEventListener("click", analyze);
+  document.getElementById("moveSelect").addEventListener("change", (event) => {
+    showHistoryPosition(event.target.value);
+  });
+  document.getElementById("moveSlider").addEventListener("input", (event) => {
+    showHistoryPosition(event.target.value);
+  });
+  document.getElementById("prevMoveBtn").addEventListener("click", () => {
+    if (currentReview) showHistoryPosition(currentReview.positionIndex - 1);
+  });
+  document.getElementById("nextMoveBtn").addEventListener("click", () => {
+    if (currentReview) showHistoryPosition(currentReview.positionIndex + 1);
+  });
 });
