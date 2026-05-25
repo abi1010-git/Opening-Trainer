@@ -202,6 +202,7 @@ function renderDetails(item, isRecurring = false) {
       detailRow("Avg drop", `${item.avg_drop_pawns ?? "n/a"} pawns`),
       detailRow("Played", formatMove(item.move_san, item.move_uci)),
       detailRow("Recommended", formatMove(item.recommended_move_san, item.recommended_move_uci)),
+      detailRow("Opening line", item.opening_moves || example.opening_moves),
       detailRow("Common opponent", item.common_opponent),
       detailRow("Time control", example.time_control),
       detailRow("Example", gameLine(example))
@@ -214,6 +215,7 @@ function renderDetails(item, isRecurring = false) {
       detailRow("Played", formatMove(item.move_san, item.move_uci)),
       detailRow("Recommended", formatMove(item.best_move_san, item.best_move_uci)),
       detailRow("Opponent reply", formatMove(item.best_reply_san, item.best_reply_uci)),
+      detailRow("Opening line", item.opening_moves),
       detailRow("Drop", `${item.drop_pawns ?? "n/a"} pawns`),
       detailRow("Eval before", item.eval_before),
       detailRow("Eval after", item.eval_after)
@@ -433,6 +435,10 @@ async function analyze() {
         all.push({
           ...m,
           opening: g.opening || g.eco || "Unknown",
+          opening_name: g.opening_name,
+          opening_moves: g.opening_moves,
+          opening_source: g.opening_source,
+          opening_matched_plies: g.opening_matched_plies,
           eco: g.eco,
           white: g.white,
           black: g.black,

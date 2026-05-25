@@ -9,6 +9,7 @@ import lichess.api
 from lichess.format import SINGLE_PGN
 import csv
 import os
+import re
 import requests
 import shutil
 import threading
@@ -58,6 +59,9 @@ def handle_error(error):
 
 
 # ---------------------- Engine helpers ----------------------
+MOVE_NUMBER_RE = re.compile(r"^\d+\.(?:\.\.)?")
+
+
 def resolve_stockfish_path():
     configured_path = os.environ.get("STOCKFISH_PATH")
     candidates = [
@@ -82,28 +86,90 @@ def resolve_stockfish_path():
     return None
 
 
-def load_eco_candidates(path="data/openings.csv"):
+def opening_tokens(moves_text: str):
+    tokens = []
+    for raw_token in (moves_text or "").replace("\n", " ").split():
+        token = raw_token.strip()
+        token = MOVE_NUMBER_RE.sub("", token)
+        token = token.strip()
+        if not token or token in {"*", "1-0", "0-1", "1/2-1/2"}:
+            continue
+        tokens.append(token.replace("0-0", "O-O"))
+    return tokens
+
+
+def opening_move_sequence(moves_text: str):
+    board = chess.Board()
+    sequence = []
+    san_sequence = []
+
+    for token in opening_tokens(moves_text):
+        try:
+            move = board.parse_san(token)
+        except ValueError:
+            return None, None
+
+        san_sequence.append(board.san(move))
+        sequence.append(move.uci())
+        board.push(move)
+
+    return tuple(sequence), tuple(san_sequence)
+
+
+def clean_opening_name(name: str, eco: str | None = None) -> str:
+    cleaned = (name or "").strip().strip(";")
+    if eco:
+        cleaned = re.sub(rf"(?:\s*;\s*|\s+){re.escape(eco)}$", "", cleaned).strip()
+    return cleaned or eco or "Unknown"
+
+
+def load_opening_data(path="data/openings.csv"):
     """
-    Returns dict: ECO -> list of {"name": str, "moves": str}
-    CSV headers: ECO,name,moves
+    Build an exact move-prefix opening database from the ECO CSV.
+    Rows that cannot be parsed as legal SAN are skipped instead of guessed.
     """
-    out = {}
+    by_eco = {}
+    all_lines = []
+    eco_map = {}
+    skipped = 0
     abs_path = os.path.join(BASE_DIR, path)
     if not os.path.exists(abs_path):
         print("ECO CSV not found:", abs_path)
-        return out
+        return by_eco, all_lines, eco_map
 
     with open(abs_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             eco = (row.get("ECO") or "").strip()
-            name = (row.get("name") or "").strip()
+            name = clean_opening_name(row.get("name"), eco)
             moves = (row.get("moves") or "").strip()
-            if not eco or not name:
+            if not eco or not name or not moves:
                 continue
-            out.setdefault(eco, []).append({"name": name, "moves": moves})
-    print(f"Loaded ECO candidates for {len(out)} codes")
-    return out
+
+            eco_map.setdefault(eco, name)
+            move_sequence, san_sequence = opening_move_sequence(moves)
+            if not move_sequence:
+                skipped += 1
+                continue
+
+            entry = {
+                "eco": eco,
+                "name": name,
+                "moves": " ".join(san_sequence),
+                "move_sequence": move_sequence,
+                "plies": len(move_sequence),
+            }
+            all_lines.append(entry)
+            by_eco.setdefault(eco, []).append(entry)
+
+    all_lines.sort(key=lambda entry: entry["plies"], reverse=True)
+    for entries in by_eco.values():
+        entries.sort(key=lambda entry: entry["plies"], reverse=True)
+
+    print(f"Loaded {len(all_lines)} opening lines for {len(by_eco)} ECO codes")
+    if skipped:
+        print(f"Skipped {skipped} unparsable opening rows")
+    return by_eco, all_lines, eco_map
 
 
 def set_job_status(job_id, **updates):
@@ -122,7 +188,8 @@ def cleanup_jobs():
         for job_id in expired:
             JOBS.pop(job_id, None)
 
-ECO_CANDIDATES = load_eco_candidates()
+OPENINGS_BY_ECO, OPENING_LINES, ECO_MAP = load_opening_data()
+MAX_OPENING_PLIES = max((entry["plies"] for entry in OPENING_LINES), default=20)
 
 def first_info(info):
     # python-chess may return a dict OR a list (multipv-style)
@@ -149,41 +216,6 @@ def move_san_from_uci(board: chess.Board, uci: str | None) -> str | None:
     except ValueError:
         return None
     return None
-
-
-def load_eco_map(path="data/openings.csv"):
-    """
-    Builds ECO -> opening name from your CSV (headers: ECO, name, moves).
-    Many rows share the same ECO (variations). We keep the FIRST name we see,
-    which is usually the canonical umbrella name (better than picking shortest).
-    """
-    import csv, os
-
-    eco_map = {}
-    abs_path = os.path.join(BASE_DIR, path)
-
-    if not os.path.exists(abs_path):
-        print("ECO CSV not found:", abs_path)
-        return eco_map
-
-    with open(abs_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            eco = (row.get("ECO") or "").strip()
-            name = (row.get("name") or "").strip()
-            if not eco or not name:
-                continue
-
-            # First wins (canonical)
-            if eco not in eco_map:
-                eco_map[eco] = name
-
-    print(f"Loaded {len(eco_map)} ECO codes from {abs_path}")
-    return eco_map
-
-
-ECO_MAP = load_eco_map()
-
 
 
 def score_to_pawns(score_obj) -> float:
@@ -238,37 +270,78 @@ def game_prefix_san(game: chess.pgn.Game, max_fullmoves: int = 6) -> str:
 
     return " ".join(parts)
 
-def best_opening_name(game: chess.pgn.Game, eco: str) -> str:
+
+def game_move_sequence(game: chess.pgn.Game, max_plies: int | None = None):
+    sequence = []
+    for move in game.mainline_moves():
+        sequence.append(move.uci())
+        if max_plies and len(sequence) >= max_plies:
+            break
+    return tuple(sequence)
+
+
+def entry_matches_game(entry, game_sequence):
+    opening_sequence = entry["move_sequence"]
+    return len(opening_sequence) <= len(game_sequence) and game_sequence[:len(opening_sequence)] == opening_sequence
+
+
+def opening_label(eco: str | None, name: str | None) -> str:
+    clean_name = clean_opening_name(name, eco)
+    if eco and clean_name and not clean_name.startswith(f"{eco} "):
+        return f"{eco} - {clean_name}"
+    return clean_name or eco or "Unknown"
+
+
+def best_opening_info(game: chess.pgn.Game, eco: str | None):
+    game_sequence = game_move_sequence(game, max_plies=MAX_OPENING_PLIES)
+    candidates = OPENINGS_BY_ECO.get(eco) or []
+
+    for entry in candidates:
+        if entry_matches_game(entry, game_sequence):
+            return {
+                "label": opening_label(entry["eco"], entry["name"]),
+                "eco": entry["eco"],
+                "name": entry["name"],
+                "moves": entry["moves"],
+                "matched_plies": entry["plies"],
+                "source": "eco_exact",
+            }
+
+    for entry in OPENING_LINES:
+        if entry_matches_game(entry, game_sequence):
+            return {
+                "label": opening_label(entry["eco"], entry["name"]),
+                "eco": entry["eco"],
+                "name": entry["name"],
+                "moves": entry["moves"],
+                "matched_plies": entry["plies"],
+                "source": "book_exact",
+            }
+
     opening_hdr = game.headers.get("Opening")
     if opening_hdr:
-        return opening_hdr
+        return {
+            "label": opening_label(eco, opening_hdr),
+            "eco": eco,
+            "name": clean_opening_name(opening_hdr, eco),
+            "moves": None,
+            "matched_plies": 0,
+            "source": "lichess_header",
+        }
 
-    cands = ECO_CANDIDATES.get(eco) or []
-    if not cands:
-        return eco or "Unknown"
+    fallback_name = ECO_MAP.get(eco)
+    return {
+        "label": opening_label(eco, fallback_name),
+        "eco": eco,
+        "name": fallback_name or eco or "Unknown",
+        "moves": None,
+        "matched_plies": 0,
+        "source": "eco_fallback" if eco else "unknown",
+    }
 
-    prefix = game_prefix_san(game, max_fullmoves=6)
 
-    def common_prefix_len(a: str, b: str) -> int:
-        n = min(len(a), len(b))
-        i = 0
-        while i < n and a[i] == b[i]:
-            i += 1
-        return i
-
-    best = None
-    best_len = -1
-    for c in cands:
-        mv = c.get("moves") or ""
-        score = common_prefix_len(prefix, mv)
-        if score > best_len:
-            best_len = score
-            best = c
-
-    if best_len <= 0:
-        return f"{eco} (Irregular / Transposition)"
-
-    return best["name"]
+def best_opening_name(game: chess.pgn.Game, eco: str | None) -> str:
+    return best_opening_info(game, eco)["label"]
 
 
 
@@ -661,13 +734,17 @@ def analyze_opening_mistakes(
                         "fen_before": fen_before,
                     })
             eco = g.headers.get("ECO")
-            opening = best_opening_name(g, eco)
+            opening_info = best_opening_info(g, eco)
 
             results.append({
                 "game_number": game_number,
                 **game_context,
-                "eco": eco,
-                "opening": opening,
+                "eco": opening_info["eco"] or eco,
+                "opening": opening_info["label"],
+                "opening_name": opening_info["name"],
+                "opening_moves": opening_info["moves"],
+                "opening_source": opening_info["source"],
+                "opening_matched_plies": opening_info["matched_plies"],
                 "move_history": move_history,
                 "mistakes": game_mistakes,
             })
@@ -702,6 +779,10 @@ def analyze_opening_mistakes(
                 agg[key] = {
                     "opening": opening_bucket,
                     "eco": game.get("eco"),
+                    "opening_name": game.get("opening_name"),
+                    "opening_moves": game.get("opening_moves"),
+                    "opening_source": game.get("opening_source"),
+                    "opening_matched_plies": game.get("opening_matched_plies"),
                     "fen_before": m["fen_before"],
                     "move_uci": m["move_uci"],
                     "count": 0,
@@ -733,6 +814,10 @@ def analyze_opening_mistakes(
                     "event": game.get("event"),
                     "time_control": game.get("time_control"),
                     "time_control_raw": game.get("time_control_raw"),
+                    "opening_name": game.get("opening_name"),
+                    "opening_moves": game.get("opening_moves"),
+                    "opening_source": game.get("opening_source"),
+                    "opening_matched_plies": game.get("opening_matched_plies"),
                     "history_index": m.get("history_index"),
                     "move_number": m.get("move_number"),
                     "side": m.get("side"),
@@ -755,6 +840,10 @@ def analyze_opening_mistakes(
         recurring.append({
             "opening": v["opening"],
             "eco": v["eco"],
+            "opening_name": v["opening_name"],
+            "opening_moves": v["opening_moves"],
+            "opening_source": v["opening_source"],
+            "opening_matched_plies": v["opening_matched_plies"],
             "fen_before": v["fen_before"],
             "move_uci": v["move_uci"],
             "move_san": v["example"].get("move_san") if v["example"] else None,
