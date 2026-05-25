@@ -1,8 +1,11 @@
 import { Chessground } from "https://unpkg.com/chessground@9.1.1/dist/chessground.min.js";
 
 let ground = null;
+let practiceGround = null;
 let gameIndex = new Map();
 let currentReview = null;
+let selectedPractice = null;
+let activePractice = null;
 
 function uciToArrow(uci) {
   if (!uci || uci.length < 4) return null;
@@ -11,13 +14,18 @@ function uciToArrow(uci) {
   return [from, to];
 }
 
-function setBoard(fen, playedUci, bestUci) {
-  const played = uciToArrow(playedUci);
-  const best = uciToArrow(bestUci);
+function sideToMoveFromFen(fen) {
+  return (fen || "").split(" ")[1] === "b" ? "black" : "white";
+}
 
-  const shapes = [];
-  if (played) shapes.push({ orig: played[0], dest: played[1], brush: "red" });
-  if (best) shapes.push({ orig: best[0], dest: best[1], brush: "green" });
+function arrowShape(uci, brush) {
+  const arrow = uciToArrow(uci);
+  if (!arrow) return null;
+  return { orig: arrow[0], dest: arrow[1], brush };
+}
+
+function setBoard(fen, playedUci, bestUci) {
+  const shapes = [arrowShape(playedUci, "red"), arrowShape(bestUci, "green")].filter(Boolean);
 
   ground.set({
     fen,
@@ -44,14 +52,26 @@ function reviewSource(item, isRecurring = false) {
   const mistakeIndex = Number(example.history_index ?? item.history_index ?? 0) || 0;
   const bestUci = item.best_move_uci || item.recommended_move_uci ||
     example.best_move_uci || example.recommended_move_uci;
+  const bestSan = item.best_move_san || item.recommended_move_san ||
+    example.best_move_san || example.recommended_move_san;
+  const playedSan = item.move_san || example.move_san;
 
   return {
+    item,
+    example,
+    isRecurring,
+    gameNumber,
+    game,
     history,
     mistakeIndex,
     playedUci: item.move_uci || example.move_uci,
+    playedSan,
     bestUci,
+    bestSan,
     fallbackFen: item.fen_before || example.fen_before,
     gameDescription: game ? gameLine(game) : gameLine(example),
+    opening: item.opening || example.opening || game?.opening || item.eco || "Unknown opening",
+    mistakeType: item.mistake_type || example.mistake_type,
   };
 }
 
@@ -106,6 +126,157 @@ function renderMoveViewer(item, isRecurring = false) {
   slider.min = "0";
   slider.max = String(source.history.length - 1);
   showHistoryPosition(source.mistakeIndex);
+}
+
+function setPracticeStatus(message, state = "") {
+  const status = document.getElementById("practiceStatus");
+  status.className = `practiceStatus ${state}`.trim();
+  status.textContent = message;
+}
+
+function renderPracticeMeta(source, active = false) {
+  const meta = document.getElementById("practiceMeta");
+  meta.replaceChildren();
+
+  const rows = [
+    ["Opening", source.opening],
+    ["Game", source.gameDescription],
+    ["Move", source.example.move_number ? `${source.example.move_number} as ${source.example.side || source.example.user_color || "player"}` : "n/a"],
+    ["Played", formatMove(source.playedSan, source.playedUci)],
+    ["Goal", active ? "Find the recommended move" : "Ready"],
+  ];
+
+  rows.forEach(([label, value]) => meta.appendChild(detailRow(label, value)));
+}
+
+function clearPractice() {
+  selectedPractice = null;
+  activePractice = null;
+  document.getElementById("practiceSelectedBtn").disabled = true;
+  document.getElementById("resetPracticeBtn").disabled = true;
+  document.getElementById("showAnswerBtn").disabled = true;
+  document.getElementById("practiceTitle").textContent = "Practice board";
+  document.getElementById("practiceMeta").textContent = "No active drill.";
+  setPracticeStatus("No mistake selected.");
+  if (practiceGround) {
+    practiceGround.set({
+      fen: "start",
+      orientation: "white",
+      viewOnly: true,
+      movable: { color: undefined, free: false, events: {} },
+      drawable: { visible: true, enabled: false, autoShapes: [] },
+    });
+  }
+}
+
+function selectPracticeMistake(item, isRecurring = false) {
+  const source = reviewSource(item, isRecurring);
+  selectedPractice = { item, isRecurring, source };
+  document.getElementById("practiceSelectedBtn").disabled = false;
+  document.getElementById("practiceTitle").textContent = source.opening;
+  renderPracticeMeta(source);
+  setPracticeStatus("Ready to practice selected mistake.");
+}
+
+function practiceFen(source) {
+  return source.history[source.mistakeIndex]?.fen || source.fallbackFen;
+}
+
+function configurePracticeBoard(shapes = [], movable = true) {
+  if (!activePractice || !practiceGround) return;
+
+  const color = sideToMoveFromFen(activePractice.fen);
+  practiceGround.set({
+    fen: activePractice.fen,
+    orientation: color,
+    turnColor: color,
+    viewOnly: !movable,
+    movable: {
+      free: movable,
+      color: movable ? color : undefined,
+      showDests: true,
+      events: movable ? { after: handlePracticeMove } : {},
+    },
+    drawable: {
+      visible: true,
+      enabled: false,
+      autoShapes: shapes,
+    },
+  });
+}
+
+function startPractice(item = null, isRecurring = false) {
+  const source = item ? reviewSource(item, isRecurring) : selectedPractice?.source;
+  if (!source || !source.bestUci) {
+    setPracticeStatus("No recommended move available for this mistake.", "wrong");
+    return;
+  }
+
+  activePractice = {
+    ...source,
+    fen: practiceFen(source),
+  };
+  selectedPractice = { item: source.item, isRecurring: source.isRecurring, source };
+  document.getElementById("practiceSelectedBtn").disabled = false;
+  document.getElementById("resetPracticeBtn").disabled = false;
+  document.getElementById("showAnswerBtn").disabled = false;
+  document.getElementById("practiceTitle").textContent = source.opening;
+  renderPracticeMeta(source, true);
+  setPracticeStatus("Your move.");
+  configurePracticeBoard();
+}
+
+function resetPractice() {
+  if (!activePractice) {
+    startPractice();
+    return;
+  }
+  setPracticeStatus("Your move.");
+  configurePracticeBoard();
+}
+
+function attemptedUci(orig, dest) {
+  if (!activePractice?.bestUci) return `${orig}${dest}`;
+  const promotion = activePractice.bestUci.length > 4 ? activePractice.bestUci[4] : "";
+  return `${orig}${dest}${promotion}`;
+}
+
+function handlePracticeMove(orig, dest) {
+  if (!activePractice) return;
+
+  const attempt = attemptedUci(orig, dest);
+  const correct = attempt === activePractice.bestUci;
+  const shape = { orig, dest, brush: correct ? "green" : "red" };
+
+  if (correct) {
+    setPracticeStatus(`Correct: ${formatMove(activePractice.bestSan, activePractice.bestUci)}.`, "correct");
+    practiceGround.set({
+      viewOnly: true,
+      movable: { color: undefined, free: false, events: {} },
+      drawable: { visible: true, enabled: false, autoShapes: [shape] },
+    });
+    return;
+  }
+
+  setPracticeStatus("Try again.", "wrong");
+  practiceGround.set({
+    fen: activePractice.fen,
+    drawable: { visible: true, enabled: false, autoShapes: [shape] },
+  });
+  window.setTimeout(() => {
+    if (activePractice) configurePracticeBoard();
+  }, 800);
+}
+
+function showPracticeAnswer() {
+  if (!activePractice) startPractice();
+  if (!activePractice) return;
+
+  const best = arrowShape(activePractice.bestUci, "green");
+  const played = arrowShape(activePractice.playedUci, "red");
+  const shapes = [played, best].filter(Boolean);
+  setPracticeStatus(`Best move: ${formatMove(activePractice.bestSan, activePractice.bestUci)}.`, "correct");
+  configurePracticeBoard(shapes, false);
 }
 
 function el(tag, className, text) {
@@ -228,6 +399,17 @@ function renderDetails(item, isRecurring = false) {
     const pvLine = el("div", "pvLine", `PV: ${pv.join(" ")}`);
     details.appendChild(pvLine);
   }
+
+  const actions = el("div", "detailActions");
+  const practiceButton = el("button", "practiceLink", "Practice this move");
+  practiceButton.type = "button";
+  practiceButton.addEventListener("click", () => {
+    selectPracticeMistake(item, isRecurring);
+    startPractice(item, isRecurring);
+    document.getElementById("practice").scrollIntoView({ block: "start" });
+  });
+  actions.appendChild(practiceButton);
+  details.appendChild(actions);
 }
 
 function renderRecurring(container, items) {
@@ -267,6 +449,7 @@ function renderRecurring(container, items) {
       selectCard(card);
       renderMoveViewer(item, true);
       renderDetails(item, true);
+      selectPracticeMistake(item, true);
     });
     container.appendChild(card);
   });
@@ -306,6 +489,7 @@ function renderMistakes(container, items) {
       selectCard(card);
       renderMoveViewer(item);
       renderDetails(item);
+      selectPracticeMistake(item);
     });
     container.appendChild(card);
   });
@@ -410,6 +594,7 @@ async function analyze() {
   document.getElementById("summary").replaceChildren();
   gameIndex = new Map();
   hideMoveViewer();
+  clearPractice();
   renderEmpty(document.getElementById("recurringList"), "Analysis is running.");
   renderEmpty(document.getElementById("mistakeList"), "Analysis is running.");
   document.getElementById("details").textContent = "Analysis is running. The board will update when mistakes are found.";
@@ -464,11 +649,14 @@ async function analyze() {
     if (first) {
       renderMoveViewer(first);
       renderDetails(first);
+      selectPracticeMistake(first);
     } else if (data.analyzed_games === 0) {
       hideMoveViewer();
+      clearPractice();
       document.getElementById("details").textContent = "No games matched this time-control filter.";
     } else {
       hideMoveViewer();
+      clearPractice();
       document.getElementById("details").textContent = "No mistakes found for this player.";
     }
   } catch (e) {
@@ -488,6 +676,15 @@ window.addEventListener("DOMContentLoaded", () => {
     drawable: { visible: true, enabled: true, autoShapes: [] },
   });
 
+  const practiceEl = document.getElementById("practiceBoard");
+  practiceGround = Chessground(practiceEl, {
+    fen: "start",
+    viewOnly: true,
+    coordinates: true,
+    drawable: { visible: true, enabled: false, autoShapes: [] },
+  });
+  clearPractice();
+
   document.getElementById("analyzeBtn").addEventListener("click", analyze);
   document.getElementById("moveSelect").addEventListener("change", (event) => {
     showHistoryPosition(event.target.value);
@@ -501,4 +698,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("nextMoveBtn").addEventListener("click", () => {
     if (currentReview) showHistoryPosition(currentReview.positionIndex + 1);
   });
+  document.getElementById("practiceSelectedBtn").addEventListener("click", () => {
+    startPractice();
+  });
+  document.getElementById("resetPracticeBtn").addEventListener("click", resetPractice);
+  document.getElementById("showAnswerBtn").addEventListener("click", showPracticeAnswer);
 });

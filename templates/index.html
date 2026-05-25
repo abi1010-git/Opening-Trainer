@@ -13,70 +13,118 @@
   </head>
 
   <body>
-    <div class="wrap">
-      <header class="header">
-        <h1>Repeated Mistakes Made in Chess Openings</h1>
-        <div class="controls">
-          <input id="username" placeholder="Lichess username" />
-          <label>Games <input id="maxGames" type="number" value="10" min="1" max="50" /></label>
-          <label>Plies <input id="plies" type="number" value="12" min="2" max="20" /></label>
-          <label>Depth <input id="depth" type="number" value="10" min="6" max="14" /></label>
-          <label>Time
-            <select id="timeMode">
-              <option value="all">All</option>
-              <option value="include">Only</option>
-              <option value="exclude">Exclude</option>
-            </select>
-          </label>
-          <input id="timeControls" class="timeControls" placeholder="3+0, 5+0" />
-          <button id="analyzeBtn">Analyze</button>
-        </div>
-        <div class="resourceLinks">
-          <a href="https://lichess.org/player" target="_blank" rel="noreferrer">Lichess player database</a>
-        </div>
-        <div id="status" class="status"></div>
-        <div id="progressPanel" class="progressPanel" hidden>
-          <div class="progressTop">
-            <span id="progressText">Loading...</span>
-            <strong id="progressPercent">0%</strong>
+    <div class="siteShell">
+      <header class="siteHeader">
+        <div class="brandBlock">
+          <span class="brandMark">RM</span>
+          <div>
+            <h1>Repeated Mistakes Made in Chess Openings</h1>
+            <a href="https://lichess.org/player" target="_blank" rel="noreferrer">Lichess player database</a>
           </div>
-          <div class="progressTrack">
-            <div id="progressFill" class="progressFill"></div>
-          </div>
-          <div id="progressDetail" class="progressDetail">Preparing analysis</div>
         </div>
-        <div id="summary" class="summary"></div>
+        <nav class="siteNav" aria-label="Main sections">
+          <a href="#analysis">Analyze</a>
+          <a href="#results">Results</a>
+          <a href="#practice">Practice</a>
+        </nav>
       </header>
 
-      <main class="main">
-        <section class="boardPanel">
-          <div id="board" class="board"></div>
-
-          <div class="legend">
-            <span class="dot red"></span> Played move (red)
-            <span class="dot green"></span> Recommended (green)
+      <main>
+        <section id="analysis" class="analysisBand">
+          <div class="sectionHead">
+            <h2>Analyze</h2>
+            <div id="status" class="status"></div>
           </div>
 
-          <div id="moveViewer" class="moveViewer" hidden>
-            <div class="moveViewerTop">
-              <button id="prevMoveBtn" type="button">Prev</button>
-              <label for="moveSelect">Move</label>
-              <select id="moveSelect"></select>
-              <button id="nextMoveBtn" type="button">Next</button>
+          <div class="controls">
+            <input id="username" placeholder="Lichess username" />
+            <label>Games <input id="maxGames" type="number" value="10" min="1" max="50" /></label>
+            <label>Plies <input id="plies" type="number" value="12" min="2" max="20" /></label>
+            <label>Depth <input id="depth" type="number" value="10" min="6" max="14" /></label>
+            <label>Time
+              <select id="timeMode">
+                <option value="all">All</option>
+                <option value="include">Only</option>
+                <option value="exclude">Exclude</option>
+              </select>
+            </label>
+            <input id="timeControls" class="timeControls" placeholder="3+0, 5+0" />
+            <button id="analyzeBtn">Analyze</button>
+          </div>
+
+          <div id="progressPanel" class="progressPanel" hidden>
+            <div class="progressTop">
+              <span id="progressText">Loading...</span>
+              <strong id="progressPercent">0%</strong>
             </div>
-            <input id="moveSlider" class="moveSlider" type="range" min="0" max="0" value="0" />
-            <div id="moveViewerMeta" class="moveViewerMeta"></div>
+            <div class="progressTrack">
+              <div id="progressFill" class="progressFill"></div>
+            </div>
+            <div id="progressDetail" class="progressDetail">Preparing analysis</div>
           </div>
 
-          <div id="details" class="details">Click a mistake to see it on the board.</div>
+          <div id="summary" class="summary"></div>
         </section>
 
-        <section class="listPanel">
-          <h2>Top recurring mistakes</h2>
-          <div id="recurringList" class="list"></div>
+        <section id="results" class="resultsBand">
+          <div class="sectionHead">
+            <h2>Results</h2>
+          </div>
 
-          <h2>All mistakes</h2>
-          <div id="mistakeList" class="list"></div>
+          <div class="resultsGrid">
+            <section class="boardPanel">
+              <div id="board" class="board"></div>
+
+              <div class="legend">
+                <span class="dot red"></span> Played move
+                <span class="dot green"></span> Recommended
+              </div>
+
+              <div id="moveViewer" class="moveViewer" hidden>
+                <div class="moveViewerTop">
+                  <button id="prevMoveBtn" type="button">Prev</button>
+                  <label for="moveSelect">Move</label>
+                  <select id="moveSelect"></select>
+                  <button id="nextMoveBtn" type="button">Next</button>
+                </div>
+                <input id="moveSlider" class="moveSlider" type="range" min="0" max="0" value="0" />
+                <div id="moveViewerMeta" class="moveViewerMeta"></div>
+              </div>
+
+              <div id="details" class="details">No mistake selected.</div>
+            </section>
+
+            <section class="listPanel">
+              <h3>Top recurring mistakes</h3>
+              <div id="recurringList" class="list"></div>
+
+              <h3>All mistakes</h3>
+              <div id="mistakeList" class="list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="practice" class="practiceBand">
+          <div class="sectionHead">
+            <h2>Practice</h2>
+            <button id="practiceSelectedBtn" class="secondaryAction" type="button" disabled>Practice selected</button>
+          </div>
+
+          <div class="practiceGrid">
+            <section class="practiceBoardPanel">
+              <div id="practiceBoard" class="board"></div>
+              <div id="practiceStatus" class="practiceStatus">No mistake selected.</div>
+            </section>
+
+            <section class="practicePanel">
+              <div id="practiceTitle" class="practiceTitle">Practice board</div>
+              <div id="practiceMeta" class="practiceMeta">No active drill.</div>
+              <div class="practiceActions">
+                <button id="resetPracticeBtn" type="button" disabled>Reset</button>
+                <button id="showAnswerBtn" type="button" disabled>Show answer</button>
+              </div>
+            </section>
+          </div>
         </section>
       </main>
     </div>
