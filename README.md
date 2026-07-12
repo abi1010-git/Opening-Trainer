@@ -1,6 +1,6 @@
 # Repeated Mistakes Made in Chess Openings(FROM LICHESS.ORG GAMES)
 
-Repeated Mistakes Made in Chess Openings is a Flask web app that reviews a Lichess user's recent games, focuses on the opening phase, and highlights recurring mistakes with Stockfish recommendations. The interface shows a chessboard with the played move and the suggested move marked as arrows.
+Repeated Mistakes Made in Chess Openings is a Flask web app that reviews a Lichess user's recent games, focuses on the opening phase, and highlights recurring mistakes with Stockfish recommendations. The interface also shows a chessboard with the played move and the suggested move marked as arrows.
 
 Live App : https://lichess-opening-trainer.onrender.com
 
