@@ -123,3 +123,31 @@ git add .
 git commit -m "Update Lichess opening coach deployment setup"
 git push
 ```
+
+
+## Personal review sessions
+
+After analyzing games, choose **Review my mistakes** to practice up to five saved
+positions. Positions with fewer previous attempts come first, with larger evaluation
+drops breaking ties. A first-try correct answer completes a position; wrong answers
+and revealed answers leave it available for a later session. **Next position** advances
+after solving or revealing a position. Completed sessions show a first-try score.
+
+The review queue and an unfinished session are saved in this browser's local storage.
+Reload the app and choose **Review my mistakes** to resume. This is device/browser
+specific, does not sync between devices, and can be removed by clearing site data.
+Analyzing another username starts that player's queue instead. Storage failures show
+a notice while allowing practice to continue.
+
+Practice accepts legal moves only; select a promotion piece when a promotion is
+available. The current drill checks the engine's recommended move, rather than
+accepting every move with a similar evaluation. Recurring summaries include only
+mistakes occurring at least twice in the analysis sample.
+
+### Regression checks
+
+```bash
+python -m unittest discover -s tests -v
+node tests/failure-state.cjs
+node tests/review-session.cjs
+```

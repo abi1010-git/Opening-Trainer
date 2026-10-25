@@ -842,6 +842,7 @@ def analyze_opening_mistakes(
         })
 
     recurring.sort(key=lambda x: (x["count"], x["avg_drop_pawns"]), reverse=True)
+    recurring = [item for item in recurring if item["count"] >= 2]
     top_recurring = recurring[:10]
 
     total_mistakes = sum(len(game.get("mistakes", [])) for game in results)
@@ -865,6 +866,18 @@ def analyze_opening_mistakes(
         "top_recurring_mistakes": top_recurring,
         "games": results,
     }
+
+
+@app.post("/practice/legal-moves")
+def practice_legal_moves():
+    payload = request.get_json(silent=True) or {}
+    try:
+        board = chess.Board(payload.get("fen", ""))
+        if not board.is_valid():
+            raise ValueError("Invalid position")
+    except (ValueError, TypeError, AttributeError):
+        return jsonify({"error": "Invalid chess position."}), 400
+    return jsonify({"moves": [move.uci() for move in board.legal_moves]})
 
 
 # ---------------------- Main endpoints ----------------------
