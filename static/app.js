@@ -40,7 +40,11 @@ function addReviewCards(data, all) {
     source.fen = practiceFen(source);
     if (!source.fen || !source.bestUci) continue;
     const key = positionKey(source);
-    if (!reviewCards.some(c => c.key === key)) {
+    const existing = reviewCards.find(c => c.key === key);
+    if (existing) {
+      existing.item = item;
+      existing.fen = source.fen;
+    } else {
       reviewCards.push({key, item, fen: source.fen, attempts: 0, mastered: false});
     }
   }
