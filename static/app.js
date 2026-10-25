@@ -661,7 +661,13 @@ async function analyze() {
     }
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
-    setProgress(100, "Analysis failed", e.message);
+    setProgress(0, "Analysis failed", e.message);
+    document.getElementById("progressPercent").textContent = "Stopped";
+    renderEmpty(document.getElementById("recurringList"), "Analysis failed. Retry to load results.");
+    renderEmpty(document.getElementById("mistakeList"), "Analysis failed. Retry to load results.");
+    document.getElementById("details").textContent = "No results available because analysis failed.";
+    hideMoveViewer();
+    clearPractice();
   } finally {
     setControlsDisabled(false);
   }

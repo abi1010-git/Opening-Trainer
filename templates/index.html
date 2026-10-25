@@ -37,10 +37,10 @@
           </div>
 
           <div class="controls">
-            <input id="username" placeholder="Lichess username" />
+            <input id="username" aria-label="Lichess username" placeholder="Lichess username" />
             <label>Games <input id="maxGames" type="number" value="10" min="1" max="50" /></label>
-            <label>Plies <input id="plies" type="number" value="12" min="2" max="20" /></label>
-            <label>Depth <input id="depth" type="number" value="10" min="6" max="14" /></label>
+            <label title="Half-moves to analyze: 12 plies equals 6 full moves">Plies <input id="plies" type="number" value="12" min="2" max="20" /></label>
+            <label title="Engine search depth. Higher values take longer">Depth <input id="depth" type="number" value="10" min="6" max="14" /></label>
             <label>Time
               <select id="timeMode">
                 <option value="all">All</option>
@@ -63,6 +63,7 @@
             <div id="progressDetail" class="progressDetail">Preparing analysis</div>
           </div>
 
+          <p class="progressDetail">Plies are half-moves: 12 plies = 6 full moves. Higher engine depth takes longer. Time controls use minutes + increment seconds, for example 3+0.</p>
           <div id="summary" class="summary"></div>
         </section>
 

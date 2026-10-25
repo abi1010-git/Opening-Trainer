@@ -5,8 +5,7 @@ import chess
 import chess.pgn
 import chess.engine
 import io
-import lichess.api
-from lichess.format import SINGLE_PGN
+from src.lichess_fetch import fetch_recent_pgn, LichessUserNotFound, LichessRequestError
 import csv
 import os
 import re
@@ -24,14 +23,6 @@ app = Flask(__name__)
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 JOB_TTL_SECONDS = 60 * 60
-
-
-class LichessUserNotFound(ValueError):
-    pass
-
-
-class LichessRequestError(RuntimeError):
-    pass
 
 
 @app.errorhandler(Exception)
@@ -401,15 +392,6 @@ def verify_lichess_user(username: str) -> str:
         profile = {}
 
     return profile.get("username") or username
-
-
-def fetch_recent_pgn(username: str, max_games: int = 5) -> str:
-    try:
-        return lichess.api.user_games(username, max=max_games, format=SINGLE_PGN)
-    except Exception as exc:
-        raise LichessRequestError(
-            "Could not fetch games from Lichess for that player. Try again in a minute."
-        ) from exc
 
 
 def load_games(pgn_text: str):
@@ -940,10 +922,10 @@ def start_opening_mistakes_job(username: str):
                 result=result,
             )
         except (LichessUserNotFound, LichessRequestError) as exc:
-            set_job_status(job_id, state="error", error=str(exc), progress_percent=100)
+            set_job_status(job_id, state="error", error=str(exc))
         except Exception as exc:
             app.logger.exception("Analysis job failed")
-            set_job_status(job_id, state="error", error=str(exc) or "Analysis failed", progress_percent=100)
+            set_job_status(job_id, state="error", error=str(exc) or "Analysis failed")
 
     threading.Thread(target=run_job, daemon=True).start()
     return jsonify({"job_id": job_id})
