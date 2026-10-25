@@ -257,7 +257,7 @@ function clearPractice() {
     practiceGround.set({
       fen: "start",
       orientation: "white",
-      viewOnly: true,
+      viewOnly: false,
       movable: { color: undefined, free: false, events: {} },
       drawable: { visible: true, enabled: false, autoShapes: [] },
     });
@@ -285,7 +285,7 @@ function configurePracticeBoard(shapes = [], movable = true) {
     fen: activePractice.fen,
     orientation: color,
     turnColor: color,
-    viewOnly: !movable,
+    viewOnly: false,
     movable: {
       free: false,
       dests: movable ? activePractice.dests : new Map(),
@@ -367,7 +367,7 @@ function handlePracticeMove(orig, dest) {
   if (correct) {
     setPracticeStatus(`Correct: ${formatMove(activePractice.bestSan, activePractice.bestUci)}.`, "correct");
     practiceGround.set({
-      viewOnly: true,
+      viewOnly: false,
       movable: { color: undefined, free: false, events: {} },
       drawable: { visible: true, enabled: false, autoShapes: [shape] },
     });
@@ -807,6 +807,7 @@ window.addEventListener("DOMContentLoaded", () => {
     fen: "start",
     viewOnly: false,
     movable: {free: false, color: undefined},
+    premovable: {enabled: false},
     coordinates: true,
     drawable: { visible: true, enabled: false, autoShapes: [] },
   });
