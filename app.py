@@ -143,7 +143,11 @@ def load_opening_data(path="data/openings.csv"):
                 skipped += 1
                 continue
 
+            position = chess.Board()
+            for uci in move_sequence:
+                position.push_uci(uci)
             entry = {
+                "position_key": " ".join(position.fen().split()[:4]),
                 "eco": eco,
                 "name": name,
                 "moves": " ".join(san_sequence),
@@ -180,6 +184,9 @@ def cleanup_jobs():
             JOBS.pop(job_id, None)
 
 OPENINGS_BY_ECO, OPENING_LINES, ECO_MAP = load_opening_data()
+OPENINGS_BY_POSITION = {}
+for entry in reversed(OPENING_LINES):
+    OPENINGS_BY_POSITION[entry["position_key"]] = entry
 MAX_OPENING_PLIES = max((entry["plies"] for entry in OPENING_LINES), default=20)
 
 def first_info(info):
@@ -284,30 +291,29 @@ def opening_label(eco: str | None, name: str | None) -> str:
 
 
 def best_opening_info(game: chess.pgn.Game, eco: str | None):
-    game_sequence = game_move_sequence(game, max_plies=MAX_OPENING_PLIES)
-    candidates = OPENINGS_BY_ECO.get(eco) or []
-
-    for entry in candidates:
-        if entry_matches_game(entry, game_sequence):
-            return {
-                "label": opening_label(entry["eco"], entry["name"]),
-                "eco": entry["eco"],
-                "name": entry["name"],
-                "moves": entry["moves"],
-                "matched_plies": entry["plies"],
-                "source": "eco_exact",
-            }
-
-    for entry in OPENING_LINES:
-        if entry_matches_game(entry, game_sequence):
-            return {
-                "label": opening_label(entry["eco"], entry["name"]),
-                "eco": entry["eco"],
-                "name": entry["name"],
-                "moves": entry["moves"],
-                "matched_plies": entry["plies"],
-                "source": "book_exact",
-            }
+    game_sequence = game_move_sequence(game, max_plies=MAX_OPENING_PLIES) if game.board().fen() == chess.STARTING_FEN else ()
+    exact = next((entry for entry in OPENING_LINES if entry_matches_game(entry, game_sequence)), None)
+    best = exact
+    matched_at = exact["plies"] if exact else 0
+    source = "book_exact"
+    if game_sequence:
+        board = game.board()
+        for ply, move in enumerate(game.mainline_moves(), start=1):
+            if ply > MAX_OPENING_PLIES:
+                break
+            board.push(move)
+            entry = OPENINGS_BY_POSITION.get(" ".join(board.fen().split()[:4]))
+            if entry and ply > matched_at:
+                best, matched_at, source = entry, ply, "book_position"
+    if best:
+        return {
+            "label": opening_label(best["eco"], best["name"]),
+            "eco": best["eco"],
+            "name": best["name"],
+            "moves": best["moves"],
+            "matched_plies": matched_at,
+            "source": source,
+        }
 
     opening_hdr = game.headers.get("Opening")
     if opening_hdr:
@@ -320,14 +326,13 @@ def best_opening_info(game: chess.pgn.Game, eco: str | None):
             "source": "lichess_header",
         }
 
-    fallback_name = ECO_MAP.get(eco)
     return {
-        "label": opening_label(eco, fallback_name),
-        "eco": eco,
-        "name": fallback_name or eco or "Unknown",
+        "label": "Unknown opening",
+        "eco": None,
+        "name": "Unknown opening",
         "moves": None,
         "matched_plies": 0,
-        "source": "eco_fallback" if eco else "unknown",
+        "source": "unknown",
     }
 
 
@@ -721,7 +726,7 @@ def analyze_opening_mistakes(
             results.append({
                 "game_number": game_number,
                 **game_context,
-                "eco": opening_info["eco"] or eco,
+                "eco": opening_info["eco"],
                 "opening": opening_info["label"],
                 "opening_name": opening_info["name"],
                 "opening_moves": opening_info["moves"],

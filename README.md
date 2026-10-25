@@ -151,3 +151,18 @@ python -m unittest discover -s tests -v
 node tests/failure-state.cjs
 node tests/review-session.cjs
 ```
+
+## Opening identification
+
+Opening names and ECO codes come from the CC0 Lichess chess-openings database:
+https://github.com/lichess-org/chess-openings (revision
+`a6189a30dc273ccb21fc2536a9a2fefd5592a67a`, 3,865 lines).
+The bundled CSV preserves the published names and legal move sequences.
+Identification uses the longest exact played prefix, then recognizes later book
+positions reached by transposition. Position comparisons include side to move,
+castling rights and legal en-passant rights. Fullmove counters are ignored.
+An unverified ECO tag cannot override a matching played line. If no book match
+exists, a supplied opening header is labeled as a header source; otherwise the
+opening is unknown. A label describes the deepest recognized book position, not
+proof that later moves remain theory. Different opening databases can use different
+ECO boundaries or names for the same position.
