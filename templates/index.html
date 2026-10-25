@@ -108,9 +108,14 @@
         <section id="practice" class="practiceBand">
           <div class="sectionHead">
             <h2>Practice</h2>
+            <button id="startReviewBtn" type="button" disabled>Review my mistakes</button>
             <button id="practiceSelectedBtn" class="secondaryAction" type="button" disabled>Practice selected</button>
           </div>
 
+          <div id="reviewSummary" class="summary" aria-live="polite">Analyze games to build your review queue.</div>
+          <p id="saveNotice" class="progressDetail">Progress stays in this browser on this device. No account needed.</p>
+          <label id="promotionControl" hidden>Promote to <select id="promotionChoice"><option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option></select></label>
+          <button id="nextReviewBtn" type="button" hidden>Next position</button>
           <div class="practiceGrid">
             <section class="practiceBoardPanel">
               <div id="practiceBoard" class="board"></div>

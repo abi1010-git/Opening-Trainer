@@ -1,5 +1,99 @@
 import { Chessground } from "https://unpkg.com/chessground@9.1.1/dist/chessground.min.js";
 
+let reviewCards = [];
+let reviewSession = null;
+let savedPlayer = "";
+let practiceGeneration = 0;
+const SAVE_KEY = "opening-trainer-review-v1";
+
+function positionKey(source) {
+  return source.fen.split(" ").slice(0, 4).join(" ");
+}
+
+function saveReview() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({version: 1, player: savedPlayer, cards: reviewCards, session: reviewSession}));
+  } catch {
+    document.getElementById("saveNotice").textContent = "Progress could not be saved. Browser storage may be full or unavailable.";
+  }
+}
+
+function renderReviewSummary() {
+  const pending = reviewCards.filter(c => !c.mastered).length;
+  document.getElementById("startReviewBtn").disabled = pending === 0;
+  const session = reviewSession;
+  document.getElementById("reviewSummary").textContent = session
+    ? (session.index >= session.keys.length
+      ? `Session complete: ${session.correct} of ${session.keys.length} correct on the first try. Missed positions stay in your queue.`
+      : `Position ${session.index + 1} of ${session.keys.length} · ${session.correct} correct on the first try`)
+    : `${savedPlayer ? savedPlayer + ": " : ""}${pending} positions to review · ${reviewCards.length - pending} completed`;
+}
+
+function addReviewCards(data, all) {
+  if (savedPlayer.toLowerCase() !== data.username.toLowerCase()) {
+    reviewCards = [];
+    reviewSession = null;
+  }
+  savedPlayer = data.username;
+  for (const item of all) {
+    const source = reviewSource(item);
+    source.fen = practiceFen(source);
+    if (!source.fen || !source.bestUci) continue;
+    const key = positionKey(source);
+    if (!reviewCards.some(c => c.key === key)) {
+      reviewCards.push({key, item, fen: source.fen, attempts: 0, mastered: false});
+    }
+  }
+  saveReview();
+  renderReviewSummary();
+}
+
+function startReview() {
+  if (!reviewSession || reviewSession.index >= reviewSession.keys.length) {
+    const cards = reviewCards.filter(c => !c.mastered).sort((a,b) => a.attempts - b.attempts || (b.item.drop_pawns || 0) - (a.item.drop_pawns || 0));
+    reviewSession = {keys: cards.slice(0, 5).map(c => c.key), index: 0, correct: 0, attempted: false, answered: false};
+  }
+  if (!reviewSession.keys.length) return;
+  loadReviewPosition();
+}
+
+function loadReviewPosition() {
+  const card = reviewCards.find(c => c.key === reviewSession.keys[reviewSession.index]);
+  if (!card) return;
+  startPractice({...card.item, fen_before: card.fen}, false, true);
+  document.getElementById("nextReviewBtn").hidden = !reviewSession.answered;
+  renderReviewSummary();
+  saveReview();
+}
+
+function recordReview(correct) {
+  if (!reviewSession || reviewSession.index >= reviewSession.keys.length || reviewSession.answered) return;
+  const card = reviewCards.find(c => c.key === reviewSession.keys[reviewSession.index]);
+  if (!card) return;
+  card.attempts++;
+  if (correct && !reviewSession.attempted) {
+    card.mastered = true;
+    reviewSession.correct++;
+  }
+  reviewSession.attempted = true;
+  if (correct) reviewSession.answered = true;
+  document.getElementById("nextReviewBtn").hidden = !reviewSession.answered;
+  saveReview();
+  renderReviewSummary();
+}
+
+function nextReview() {
+  if (!reviewSession?.answered) return;
+  reviewSession.index++;
+  reviewSession.attempted = false;
+  reviewSession.answered = false;
+  document.getElementById("nextReviewBtn").hidden = true;
+  saveReview();
+  renderReviewSummary();
+  if (reviewSession.index < reviewSession.keys.length) loadReviewPosition();
+  else setPracticeStatus("Session complete. Start another review to revisit missed positions.");
+}
+
 let ground = null;
 let practiceGround = null;
 let gameIndex = new Map();
@@ -150,6 +244,7 @@ function renderPracticeMeta(source, active = false) {
 }
 
 function clearPractice() {
+  practiceGeneration++;
   selectedPractice = null;
   activePractice = null;
   document.getElementById("practiceSelectedBtn").disabled = true;
@@ -192,7 +287,8 @@ function configurePracticeBoard(shapes = [], movable = true) {
     turnColor: color,
     viewOnly: !movable,
     movable: {
-      free: movable,
+      free: false,
+      dests: movable ? activePractice.dests : new Map(),
       color: movable ? color : undefined,
       showDests: true,
       events: movable ? { after: handlePracticeMove } : {},
@@ -205,7 +301,9 @@ function configurePracticeBoard(shapes = [], movable = true) {
   });
 }
 
-function startPractice(item = null, isRecurring = false) {
+async function startPractice(item = null, isRecurring = false, inSession = false) {
+  if (!inSession) { reviewSession = null; document.getElementById("nextReviewBtn").hidden = true; saveReview(); renderReviewSummary(); }
+  const generation = ++practiceGeneration;
   const source = item ? reviewSource(item, isRecurring) : selectedPractice?.source;
   if (!source || !source.bestUci) {
     setPracticeStatus("No recommended move available for this mistake.", "wrong");
@@ -222,8 +320,25 @@ function startPractice(item = null, isRecurring = false) {
   document.getElementById("showAnswerBtn").disabled = false;
   document.getElementById("practiceTitle").textContent = source.opening;
   renderPracticeMeta(source, true);
-  setPracticeStatus("Your move.");
-  configurePracticeBoard();
+  setPracticeStatus("Loading legal moves...");
+  configurePracticeBoard([], false);
+  try {
+    const res = await fetch("/practice/legal-moves", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({fen: activePractice.fen})});
+    const data = await parseApiResponse(res);
+    if (generation !== practiceGeneration) return;
+    activePractice.legalMoves = data.moves;
+    activePractice.dests = new Map();
+    for (const uci of data.moves) {
+      const from = uci.slice(0,2), to = uci.slice(2,4);
+      if (!activePractice.dests.has(from)) activePractice.dests.set(from, []);
+      if (!activePractice.dests.get(from).includes(to)) activePractice.dests.get(from).push(to);
+    }
+    document.getElementById("promotionControl").hidden = !data.moves.some(m => m.length === 5);
+    setPracticeStatus("Your move. Click a piece and a highlighted square, or drag it.");
+    configurePracticeBoard();
+  } catch (e) {
+    if (generation === practiceGeneration) setPracticeStatus(`Could not load this drill: ${e.message}. Select the position again to retry.`, "wrong");
+  }
 }
 
 function resetPractice() {
@@ -236,16 +351,17 @@ function resetPractice() {
 }
 
 function attemptedUci(orig, dest) {
-  if (!activePractice?.bestUci) return `${orig}${dest}`;
-  const promotion = activePractice.bestUci.length > 4 ? activePractice.bestUci[4] : "";
-  return `${orig}${dest}${promotion}`;
+  const base = `${orig}${dest}`;
+  return activePractice?.legalMoves?.includes(base) ? base : base + document.getElementById("promotionChoice").value;
 }
 
 function handlePracticeMove(orig, dest) {
   if (!activePractice) return;
 
   const attempt = attemptedUci(orig, dest);
+  if (!activePractice.legalMoves?.includes(attempt)) { configurePracticeBoard(); return; }
   const correct = attempt === activePractice.bestUci;
+  recordReview(correct);
   const shape = { orig, dest, brush: correct ? "green" : "red" };
 
   if (correct) {
@@ -263,8 +379,9 @@ function handlePracticeMove(orig, dest) {
     fen: activePractice.fen,
     drawable: { visible: true, enabled: false, autoShapes: [shape] },
   });
+  const drill = activePractice;
   window.setTimeout(() => {
-    if (activePractice) configurePracticeBoard();
+    if (activePractice === drill) configurePracticeBoard();
   }, 800);
 }
 
@@ -272,6 +389,8 @@ function showPracticeAnswer() {
   if (!activePractice) startPractice();
   if (!activePractice) return;
 
+  recordReview(false);
+  if (reviewSession) { reviewSession.answered = true; document.getElementById("nextReviewBtn").hidden = false; saveReview(); }
   const best = arrowShape(activePractice.bestUci, "green");
   const played = arrowShape(activePractice.playedUci, "red");
   const shapes = [played, best].filter(Boolean);
@@ -641,6 +760,7 @@ async function analyze() {
 
     const skippedText = data.skipped_games ? ` (${plural(data.skipped_games, "game")} skipped by time filter)` : "";
     status.textContent = `Done. ${data.username} made ${plural(all.length, "opening mistake")} in ${plural(data.analyzed_games, "analyzed game")}${skippedText}.`;
+    addReviewCards(data, all);
     renderSummary(data, all);
     renderRecurring(document.getElementById("recurringList"), data.top_recurring_mistakes || []);
     renderMistakes(document.getElementById("mistakeList"), all);
@@ -685,11 +805,24 @@ window.addEventListener("DOMContentLoaded", () => {
   const practiceEl = document.getElementById("practiceBoard");
   practiceGround = Chessground(practiceEl, {
     fen: "start",
-    viewOnly: true,
+    viewOnly: false,
+    movable: {free: false, color: undefined},
     coordinates: true,
     drawable: { visible: true, enabled: false, autoShapes: [] },
   });
   clearPractice();
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+    if (saved?.version === 1 && Array.isArray(saved.cards)) {
+      reviewCards = saved.cards.filter(c => typeof c.fen === "string" && c.item?.best_move_uci && typeof c.key === "string");
+      savedPlayer = typeof saved.player === "string" ? saved.player : "";
+      reviewSession = saved.session && Array.isArray(saved.session.keys) && Number.isInteger(saved.session.index) && saved.session.index >= 0 ? saved.session : null;
+      document.getElementById("username").value = savedPlayer;
+    }
+  } catch { document.getElementById("saveNotice").textContent = "Saved progress could not be read. You can still analyze and practice."; }
+  renderReviewSummary();
+  document.getElementById("startReviewBtn").addEventListener("click", startReview);
+  document.getElementById("nextReviewBtn").addEventListener("click", nextReview);
 
   document.getElementById("analyzeBtn").addEventListener("click", analyze);
   document.getElementById("moveSelect").addEventListener("change", (event) => {
