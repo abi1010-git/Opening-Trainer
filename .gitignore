@@ -11,3 +11,4 @@ __pycache__/
 
 # Stockfish binaries (platform-specific)
 engine/stockfish*
+.claude/
