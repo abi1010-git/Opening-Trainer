@@ -8,7 +8,7 @@ const STAGES: { key: Progress['stage']; label: string }[] = [
   { key: 'summarizing', label: 'Find patterns' },
 ];
 
-export default function ProgressView({ progress, onCancel }: { progress: Progress; onCancel: () => void }) {
+export default function ProgressView({ progress, onCancel, title = 'Analyzing your games' }: { progress: Progress; onCancel: () => void; title?: string }) {
   const stageIndex = STAGES.findIndex((s) => s.key === progress.stage);
   const pct =
     progress.stage === 'analyzing'
@@ -23,7 +23,7 @@ export default function ProgressView({ progress, onCancel }: { progress: Progres
     <div className="mx-auto max-w-xl px-4 py-20">
       <Card className="rise p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Analyzing your games</h2>
+          <h2 className="text-lg font-semibold">{title}</h2>
           <span className="tabular-nums text-sm text-muted">{Math.round(pct)}%</span>
         </div>
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-panel-2" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>

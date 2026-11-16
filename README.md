@@ -20,11 +20,17 @@ So I built this to look at all my recent games at once and answer one question: 
 
 **Finds your repeated mistakes.** It checks the opening of every game you choose with Stockfish, one of the strongest chess engines, and groups identical mistakes together. Instead of "you blundered in game 14", you see *"you played 5…gxf6 in 3 different games, and 5…exf6 is better."*
 
-**Shows you why.** For each mistake you can replay the game on a board, see your move next to the better one, the line the engine recommends, and the reply your opponent could have punished you with. There are links back to every game.
+**Explains why, in plain English.** For each mistake you can replay the game on a board and read what actually goes wrong: *"Nc6 loses your knight on f6: exf6 takes it right away"*, *"allows Nc7+, which attacks your king and rook at once"*, or *"no immediate tactic, it's a positional error"*. The explanations come from replaying the engine's lines, not from an AI chatbot, so they don't make things up.
+
+**Shows what players at your rating play.** Next to each mistake you see how often players at your level choose each move in that position and how it scores, from the Lichess opening database. It points out common traps (*"35% of players at your level play this, and it scores only 41%"*) and strong moves your opponents rarely expect.
 
 **Maps the openings you really play.** Your **Repertoire** is a move tree built from your own games, not from a book. Every branch shows how often you reach it and how you score there. Lines you play a lot and lose in are marked **weak**, so you know where to study.
 
 **Trains you until it sticks.** Every mistake becomes a drill. You see the position and find the right move. Positions you get wrong come back in 10 minutes. Positions you get right come back after 1 day, then 3 days, then about a week, and so on, so you only review what you're close to forgetting. If you find a different move that's just as good, it counts.
+
+**Checks that the training worked.** Each time you analyse new games, it looks for positions you've drilled and checks what you actually played. Every drilled position is marked **Fixed in real games**, **Still repeating** or **Not reached yet**, so you know your practice is paying off.
+
+**Preps you for your next opponent.** Enter their username in **Scout**. It analyses their recent games, finds the mistakes *they* repeat, and checks which of those positions your own openings already reach, with the line to get there.
 
 **Shows how each opening is going.** Your score, mistakes per game, and how early your first mistake usually comes, for every opening you play as White and as Black.
 
@@ -35,12 +41,15 @@ So I built this to look at all my recent games at once and answer one question: 
 3. **Click "Analyze my openings".** It usually takes under a minute for 25 games.
 4. **Start with the Overview.** The top of the page shows the mistakes you repeat most. Click one to see it on the board.
 5. **Go to Train** and work through your due positions. A badge on the Train tab shows how many are waiting.
-6. **Come back every few days.** Do your due drills, and re-analyse after you've played more games. Your training progress is kept.
+6. **Before a game,** open **Scout** and enter your opponent's username to see where they tend to go wrong.
+7. **Come back every few days.** Do your due drills, and re-analyse after you've played more games. Your training progress is kept.
 
 ### Tips
 
 - **25 to 50 games** is the sweet spot. Fewer games means fewer repeats to find.
 - **Pick the time controls you care about.** Bullet openings are often different from rapid ones.
+- **Limit it to recent games** (last month, 3 months or year) if your openings have changed.
+- **Watch for "few games".** A score from under 5 games can swing a lot, so the app labels it.
 - **Re-running is fast.** Positions already checked are remembered, so a second analysis mostly only checks new games.
 
 ## FAQ
@@ -49,7 +58,7 @@ So I built this to look at all my recent games at once and answer one question: 
 Yes, and no. There's nothing to sign up for. You only type a public username.
 
 **Where does my data go?**
-Your games are downloaded from the public Lichess or Chess.com APIs straight into your browser. The analysis runs on your own computer, and your report and drill progress are saved only in your browser. Nothing is uploaded anywhere.
+Your games are downloaded from the public Lichess or Chess.com APIs straight into your browser. The analysis runs on your own computer, and your report and drill progress are saved only in your browser. The only thing sent anywhere is a board position, to the Lichess opening database, when you open a mistake to see what players at your rating play. No username or personal data is sent with it.
 
 **How much of each game is checked?**
 Each game is checked until **6 moves after it leaves known opening theory**, because that's where most opening mistakes happen. That's always at least the first 8 moves and at most move 15 by default. You can raise the limit under **Advanced**.
@@ -78,6 +87,8 @@ A few implementation details:
 - **Each position is evaluated once:** the evaluation after one move is reused as the evaluation before the next.
 - **Mistakes are graded by drop in winning chances** (the same curve Lichess uses), not raw pawns, so a move that keeps a won position won isn't flagged.
 - **Openings are named by position, not move order,** so transpositions get the right name.
+- **Rule-based explanations:** the engine's refutation line is replayed with chess.js to detect lost material, forks and missed wins, and a claim is only made when the engine's evaluation agrees.
+- **Closed feedback loop:** drilled positions are matched against later real games to measure whether training carried over.
 
 **Stack:** React 19, TypeScript, Vite, Tailwind CSS 4, chess.js, Chessground, Stockfish 19 (WASM), Vitest, GitHub Actions and Pages.
 

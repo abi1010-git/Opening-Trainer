@@ -1,4 +1,6 @@
-import type { Color, Leak } from './types';
+import { positionsFor } from './analysis';
+import { positionKey } from './format';
+import type { AnalyzedGame, Color, Leak } from './types';
 
 /**
  * Spaced repetition for your own mistakes (a simplified SM-2, the algorithm behind Anki).
@@ -22,7 +24,20 @@ export interface Card {
   reps: number;
   lapses: number;
   lastReviewed?: number;
+  /** When you first drilled this position; real games after this show whether training carried over. */
+  firstReviewed?: number;
+  /** Every analysed real game in which you reached this position, and whether you got it right. */
+  encounters?: Encounter[];
 }
+
+export interface Encounter {
+  gameId: string;
+  date: string;
+  playedSan: string;
+  correct: boolean;
+}
+
+export type TransferStatus = 'untrained' | 'unseen' | 'fixed' | 'repeating';
 
 const DAY = 24 * 60 * 60 * 1000;
 const RETRY_DELAY = 10 * 60 * 1000;
@@ -63,6 +78,7 @@ export function review(card: Card, correct: boolean, now = Date.now()): Card {
       ease: Math.max(1.3, card.ease - 0.2),
       due: now + RETRY_DELAY,
       lastReviewed: now,
+      firstReviewed: card.firstReviewed ?? now,
     };
   }
   const reps = card.reps + 1;
@@ -74,6 +90,7 @@ export function review(card: Card, correct: boolean, now = Date.now()): Card {
     ease: Math.min(3, card.ease + 0.05),
     due: now + intervalDays * DAY,
     lastReviewed: now,
+    firstReviewed: card.firstReviewed ?? now,
   };
 }
 
@@ -97,4 +114,51 @@ export function masteryCounts(cards: Record<string, Card>) {
     mastered: list.filter((c) => c.intervalDays >= 7).length,
     fresh: list.filter((c) => c.reps === 0 && c.lapses === 0).length,
   };
+}
+
+const MAX_ENCOUNTERS = 30;
+
+/**
+ * Closes the loop between training and real play: finds every analysed game where you reached a
+ * drilled position and records whether you played a good move there. A move counts as correct if it
+ * is the drill's answer or the engine didn't flag it as a mistake.
+ */
+export function recordRealGames(cards: Record<string, Card>, games: AnalyzedGame[]): Record<string, Card> {
+  const next = { ...cards };
+  for (const game of games) {
+    const { fens, ucis, sans } = positionsFor(game.moves, game.analyzedPlies);
+    for (let i = 0; i < sans.length; i++) {
+      const toMove: Color = i % 2 === 0 ? 'white' : 'black';
+      if (toMove !== game.userColor) continue;
+      const card = next[positionKey(fens[i])];
+      if (!card || card.color !== game.userColor) continue;
+      if (card.encounters?.some((e) => e.gameId === game.id)) continue;
+      const correct = ucis[i].slice(0, 4) === card.answerUci.slice(0, 4) || !game.mistakes.some((m) => m.ply === i + 1);
+      const encounters = [...(card.encounters ?? []), { gameId: game.id, date: game.date, playedSan: sans[i], correct }]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-MAX_ENCOUNTERS);
+      next[card.id] = { ...card, encounters };
+    }
+  }
+  return next;
+}
+
+/** Real games played after you started drilling this position. */
+export function gamesSinceTraining(card: Card): Encounter[] {
+  if (!card.firstReviewed) return [];
+  const since = card.firstReviewed;
+  return (card.encounters ?? []).filter((e) => Date.parse(e.date) > since);
+}
+
+export function transferStatus(card: Card): TransferStatus {
+  if (!card.firstReviewed) return 'untrained';
+  const after = gamesSinceTraining(card);
+  if (!after.length) return 'unseen';
+  return after[after.length - 1].correct ? 'fixed' : 'repeating';
+}
+
+export function transferSummary(cards: Record<string, Card>) {
+  const counts: Record<TransferStatus, number> = { untrained: 0, unseen: 0, fixed: 0, repeating: 0 };
+  for (const c of Object.values(cards)) counts[transferStatus(c)]++;
+  return counts;
 }

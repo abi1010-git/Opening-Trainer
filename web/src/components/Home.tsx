@@ -21,13 +21,14 @@ export default function Home({ onSubmit, error, hasReport, onBack }: Props) {
   const [speeds, setSpeeds] = useState<Speed[]>(saved.speeds ?? []);
   const [maxPlies, setMaxPlies] = useState(saved.maxPlies ?? 30);
   const [depth, setDepth] = useState(saved.depth ?? 12);
+  const [sinceDays, setSinceDays] = useState(saved.sinceDays ?? 0);
 
   const toggleSpeed = (s: Speed) => setSpeeds((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!username.trim()) return;
-    onSubmit({ site, username: username.trim(), maxGames, speeds, maxPlies, depth });
+    onSubmit({ site, username: username.trim(), maxGames, speeds, maxPlies, depth, sinceDays });
   };
 
   return (
@@ -108,6 +109,22 @@ export default function Home({ onSubmit, error, hasReport, onBack }: Props) {
                 {SPEEDS.filter((s) => site === 'lichess' || s !== 'classical').map((s) => (
                   <Chip key={s} active={speeds.includes(s)} onClick={() => toggleSpeed(s)}>
                     <span className="capitalize">{s}</span>
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium">Played in</div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  [0, 'Any time'],
+                  [30, 'Last month'],
+                  [90, 'Last 3 months'],
+                  [365, 'Last year'],
+                ].map(([days, label]) => (
+                  <Chip key={days} active={sinceDays === days} onClick={() => setSinceDays(days as number)}>
+                    {label}
                   </Chip>
                 ))}
               </div>

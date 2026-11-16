@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { positionsFor } from '../lib/analysis';
+import { explainMistake } from '../lib/explain';
+import { fetchExplorer, practicalInsights, type ExplorerResult } from '../lib/explorer';
 import { formatEval, moveLabel, plural } from '../lib/format';
 import type { AnalyzedGame, Color, Leak, Report, Severity } from '../lib/types';
 import Board, { type Arrow } from './Board';
@@ -34,7 +36,7 @@ export default function Mistakes({ report, selectedId, onSelect }: Props) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-      <div>{selected ? <LeakDetail key={selected.id} leak={selected} games={report.games} /> : <Empty title="No mistakes match these filters" />}</div>
+      <div>{selected ? <LeakDetail key={selected.id} leak={selected} report={report} /> : <Empty title="No mistakes match these filters" />}</div>
 
       <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
@@ -91,7 +93,9 @@ export default function Mistakes({ report, selectedId, onSelect }: Props) {
   );
 }
 
-function LeakDetail({ leak, games }: { leak: Leak; games: AnalyzedGame[] }) {
+function LeakDetail({ leak, report }: { leak: Leak; report: Report }) {
+  const games = report.games;
+  const explanation = useMemo(() => explainMistake(leak), [leak]);
   const leakGames = leak.gameIds.map((id) => games.find((g) => g.id === id)).filter((g): g is AnalyzedGame => !!g);
   const [gameIdx, setGameIdx] = useState(0);
   const game = leakGames[gameIdx] ?? leakGames[0];
@@ -183,6 +187,11 @@ function LeakDetail({ leak, games }: { leak: Leak; games: AnalyzedGame[] }) {
               </div>
             </div>
           )}
+          <div className="rounded-lg border border-line bg-panel-2 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Why it's a mistake</div>
+            <p className="mt-1 text-sm">{explanation.headline}</p>
+            {explanation.detail && <p className="mt-1 font-mono text-xs text-muted">{explanation.detail}</p>}
+          </div>
           {mistake && (
             <div className="flex gap-4 text-xs text-muted">
               <span>Before: {formatEval(mistake.evalBefore)}</span>
@@ -192,6 +201,8 @@ function LeakDetail({ leak, games }: { leak: Leak; games: AnalyzedGame[] }) {
           )}
           <p className="text-xs text-muted">You scored {Math.round(leak.scoreInGames * 100)}% in these games. Use ← → to step through the game.</p>
         </Card>
+
+        <AtYourLevel leak={leak} report={report} />
 
         <Card className="p-0">
           <div className="border-b border-line px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted">
@@ -234,5 +245,68 @@ export function OutcomeTag({ outcome }: { outcome: AnalyzedGame['outcome'] }) {
     >
       {outcome}
     </span>
+  );
+}
+
+/** What players at the user's rating play in this position, from the Lichess opening database. */
+function AtYourLevel({ leak, report }: { leak: Leak; report: Report }) {
+  const rating = useMemo(() => {
+    const rs = report.games.map((g) => g.userRating).filter((r): r is number => !!r);
+    return rs.length ? Math.round(rs.reduce((a, b) => a + b, 0) / rs.length) : 1500;
+  }, [report.games]);
+  const speeds = useMemo(() => [...new Set(report.games.map((g) => g.speed))], [report.games]);
+  const [state, setState] = useState<{ data?: ExplorerResult; error?: string }>({});
+
+  useEffect(() => {
+    let alive = true;
+    setState({});
+    fetchExplorer(leak.fenBefore, rating, speeds).then(
+      (data) => alive && setState({ data }),
+      (err: Error) => alive && setState({ error: err.message }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [leak.fenBefore, rating, speeds]);
+
+  const { data, error } = state;
+  const insights = data ? practicalInsights(data, leak.playedSan, leak.bestSan) : [];
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">At your level</div>
+        {data && (
+          <div className="text-[11px] text-muted">
+            Lichess players rated {data.band[0]}–{data.band[1]} · {data.total.toLocaleString()} games
+          </div>
+        )}
+      </div>
+      {error && <p className="text-sm text-muted">{error}</p>}
+      {!data && !error && <p className="text-sm text-muted">Loading what players at your rating play here…</p>}
+      {data && data.total === 0 && <p className="text-sm text-muted">No games at your level reached this position.</p>}
+      {data && data.total > 0 && (
+        <>
+          <ul className="space-y-1.5">
+            {data.moves.slice(0, 5).map((m) => (
+              <li key={m.uci} className="flex items-center gap-2 text-sm">
+                <span className={cx('w-14 font-mono font-semibold', m.san === leak.playedSan && 'text-bad', m.san === leak.bestSan && 'text-accent')}>{m.san}</span>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-panel-2">
+                  <div className={cx('h-full', m.san === leak.playedSan ? 'bg-bad' : m.san === leak.bestSan ? 'bg-accent' : 'bg-muted/60')} style={{ width: `${Math.max(2, m.share * 100)}%` }} />
+                </div>
+                <span className="w-10 text-right text-xs tabular-nums text-muted">{Math.round(m.share * 100)}%</span>
+                <span className="w-20 text-right text-xs tabular-nums text-muted">scores {Math.round(m.score * 100)}%</span>
+              </li>
+            ))}
+          </ul>
+          {insights.map((i) => (
+            <p key={i.text} className={cx('text-sm', i.tone === 'bad' && 'text-bad', i.tone === 'good' && 'text-accent', i.tone === 'info' && 'text-muted')}>
+              {i.text}
+            </p>
+          ))}
+          {report.params.site === 'chesscom' && <p className="text-[11px] text-muted">Chess.com and Lichess ratings differ, so the rating group is approximate.</p>}
+        </>
+      )}
+    </Card>
   );
 }

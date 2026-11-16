@@ -12,7 +12,7 @@ export async function loadReport(): Promise<Report | null> {
   try {
     const report = await get<Report>(REPORT_KEY);
     // Reports saved by older versions of the app have a different shape; re-analysing is quick.
-    return report?.version === 2 ? report : null;
+    return report?.version === 3 ? report : null;
   } catch {
     return null;
   }

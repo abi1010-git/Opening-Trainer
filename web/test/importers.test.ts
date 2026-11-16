@@ -92,3 +92,11 @@ describe('identifyOpening', () => {
     expect(identifyOpening(['d4'], book, "Queen's Pawn Game", 'A40')).toMatchObject({ name: "Queen's Pawn Game", source: 'site' });
   });
 });
+
+describe('archiveEndMs', () => {
+  it('returns the end of a monthly archive', async () => {
+    const { archiveEndMs } = await import('../src/lib/importers');
+    expect(new Date(archiveEndMs('https://api.chess.com/pub/player/x/games/2026/03')).toISOString()).toBe('2026-04-01T00:00:00.000Z');
+    expect(new Date(archiveEndMs('https://api.chess.com/pub/player/x/games/2025/12')).toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+});

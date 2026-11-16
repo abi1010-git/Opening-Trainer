@@ -17,6 +17,7 @@ export async function runAnalysis(
     importGames(params.site, params.username, {
       maxGames: params.maxGames,
       speeds: params.speeds,
+      sinceDays: params.sinceDays,
       signal,
       onProgress: (message) => onProgress({ stage: 'fetching', message, current: 0, total: params.maxGames }),
     }),
@@ -24,8 +25,8 @@ export async function runAnalysis(
   ]);
   if (!games.length) {
     throw new ImportError(
-      params.speeds.length
-        ? `No standard games found for "${params.username}" with those time controls.`
+      params.speeds.length || params.sinceDays
+        ? `No standard games found for "${params.username}" with those filters.`
         : `No standard games found for "${params.username}".`,
     );
   }
@@ -52,7 +53,7 @@ export async function runAnalysis(
 
     onProgress({ stage: 'summarizing', message: 'Finding patterns', current: games.length, total: games.length });
     const report: Report = {
-      version: 2,
+      version: 3,
       createdAt: new Date().toISOString(),
       params,
       username: inferDisplayName(analyzed, params.username),

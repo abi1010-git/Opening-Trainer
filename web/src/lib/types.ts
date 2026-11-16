@@ -63,6 +63,10 @@ export interface Mistake {
   bestLineSan: string[];
   replySan: string | null;
   replyUci: string | null;
+  /** The opponent's best line after the mistake (SAN), used to explain what goes wrong. */
+  refutationSan: string[];
+  /** Moves (SAN) from the start position to the position before the mistake. */
+  lineBefore: string[];
   /** Evals in pawns from the mover's point of view. */
   evalBefore: number;
   evalAfter: number;
@@ -94,6 +98,11 @@ export interface Leak {
   bestUci: string | null;
   bestLineSan: string[];
   replySan: string | null;
+  refutationSan: string[];
+  lineBefore: string[];
+  allowsMate: boolean;
+  evalBefore: number;
+  evalAfter: number;
   count: number;
   avgDropPawns: number;
   severity: Severity;
@@ -122,12 +131,14 @@ export interface AnalysisParams {
   maxGames: number;
   /** Upper limit for the adaptive opening cutoff, in half-moves. */
   maxPlies: number;
+  /** Only games from the last N days (0 = any time). */
+  sinceDays?: number;
   depth: number;
   speeds: Speed[];
 }
 
 export interface Report {
-  version: 2;
+  version: 3;
   createdAt: string;
   params: AnalysisParams;
   username: string;
