@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeGame, classifyMove, evalToPawns, findLeaks, openingStats, positionsFor, type Evaluator } from '../src/lib/analysis';
+import { analyzeGame, classifyMove, evalToPawns, findLeaks, openingCutoff, openingStats, positionsFor, type Evaluator } from '../src/lib/analysis';
+import type { OpeningBook } from '../src/lib/openings';
 import { parseInfoLine } from '../src/lib/engine';
 import { positionKey } from '../src/lib/format';
 import type { GameRecord, PositionEval } from '../src/lib/types';
@@ -121,5 +122,34 @@ describe('analyzeGame + findLeaks', () => {
     expect(leaks[0].count).toBe(2);
     expect(leaks[0].scoreInGames).toBe(0.25);
     expect(openingStats(games)[0]).toMatchObject({ games: 2, losses: 1, draws: 1, mistakes: 2 });
+  });
+});
+
+describe('openingCutoff', () => {
+  it('checks 6 moves past the end of book theory', () => {
+    expect(openingCutoff(10, 30)).toBe(22);
+  });
+
+  it('always checks at least 8 moves, even if the game left theory immediately', () => {
+    expect(openingCutoff(0, 30)).toBe(16);
+    expect(openingCutoff(2, 30)).toBe(16);
+  });
+
+  it('never goes past the maximum', () => {
+    expect(openingCutoff(28, 30)).toBe(30);
+  });
+
+  it('respects a maximum below the usual minimum', () => {
+    expect(openingCutoff(0, 10)).toBe(10);
+  });
+
+  it('analyses deeper when the game follows a long book line', async () => {
+    const moves = ['e4', 'c5', 'Nf3', 'd6', 'd4', 'cxd4', 'Nxd4', 'Nf6', 'Nc3', 'a6', 'Be3', 'e5', 'Nb3', 'Be6', 'f3', 'Be7', 'Qd2', 'O-O', 'O-O-O', 'Nbd7', 'g4', 'b5', 'g5', 'b4', 'Ne2', 'Nh5', 'Ng3', 'a5', 'Nxh5', 'Bxh5'];
+    const book: OpeningBook = { [positionKey(positionsFor(moves, 10).fens[10])]: ['B90', 'Sicilian Defense: Najdorf Variation', 10, ''] };
+    const ev = fakeEvaluator({});
+    const inBook = await analyzeGame(game('n', moves, 'white'), book, ev, 40, 10);
+    const offBook = await analyzeGame(game('o', moves, 'white'), {}, ev, 40, 10);
+    expect(inBook.analyzedPlies).toBe(22);
+    expect(offBook.analyzedPlies).toBe(16);
   });
 });

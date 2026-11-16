@@ -23,6 +23,7 @@ export default function Overview({ report, cards, onOpenLeak, onTrain, onReperto
   const due = dueCards(cards).length;
   const topLeaks: Leak[] = (repeated.length ? repeated : report.leaks).slice(0, 4);
   const cleanGames = games.filter((g) => g.mistakes.length === 0).length;
+  const avgCheckedMove = Math.round(games.reduce((s, g) => s + g.analyzedPlies, 0) / games.length / 2);
 
   const weak = useMemo(() => {
     const white = weakLines(buildRepertoire(games, 'white'), 3, 3).map((n) => ({ n, color: 'white' as const }));
@@ -165,7 +166,7 @@ export default function Overview({ report, cards, onOpenLeak, onTrain, onReperto
 
       <p className="text-center text-xs text-muted">
         {report.positionsEvaluated + report.cacheHits} positions checked in {(report.engineMs / 1000).toFixed(1)}s on your device
-        {report.cacheHits > 0 && ` (${report.cacheHits} from cache)`} · depth {report.params.depth} · first {report.params.plies / 2} moves
+        {report.cacheHits > 0 && ` (${report.cacheHits} from cache)`} · depth {report.params.depth} · openings checked to move {avgCheckedMove} on average (stops 6 moves after theory ends)
       </p>
     </div>
   );
