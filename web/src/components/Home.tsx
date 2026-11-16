@@ -19,7 +19,7 @@ export default function Home({ onSubmit, error, hasReport, onBack }: Props) {
   const [username, setUsername] = useState(saved.username ?? '');
   const [maxGames, setMaxGames] = useState(saved.maxGames ?? 25);
   const [speeds, setSpeeds] = useState<Speed[]>(saved.speeds ?? []);
-  const [plies, setPlies] = useState(saved.plies ?? 16);
+  const [maxPlies, setMaxPlies] = useState(saved.maxPlies ?? 30);
   const [depth, setDepth] = useState(saved.depth ?? 12);
 
   const toggleSpeed = (s: Speed) => setSpeeds((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
@@ -27,7 +27,7 @@ export default function Home({ onSubmit, error, hasReport, onBack }: Props) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!username.trim()) return;
-    onSubmit({ site, username: username.trim(), maxGames, speeds, plies, depth });
+    onSubmit({ site, username: username.trim(), maxGames, speeds, maxPlies, depth });
   };
 
   return (
@@ -115,9 +115,9 @@ export default function Home({ onSubmit, error, hasReport, onBack }: Props) {
 
             <details className="group rounded-lg border border-line bg-panel-2/50 px-3 py-2">
               <summary className="cursor-pointer select-none text-sm text-muted group-open:mb-3">Advanced</summary>
-              <Slider label="Opening length" value={plies} min={8} max={30} step={2} onChange={setPlies} display={`first ${plies / 2} moves`} />
+              <Slider label="Check moves up to" value={maxPlies} min={16} max={40} step={2} onChange={setMaxPlies} display={`move ${maxPlies / 2}`} />
               <Slider label="Engine depth" value={depth} min={8} max={18} onChange={setDepth} display={`depth ${depth}`} />
-              <p className="mt-2 text-xs text-muted">Higher depth is more accurate but slower. Results are cached, so re-runs are quick.</p>
+              <p className="mt-2 text-xs text-muted">Each game is checked until 6 moves after it leaves opening theory (at least 8 moves, at most the limit above). Higher depth is more accurate but slower. Results are cached, so re-runs are quick.</p>
             </details>
 
             {error && <div className="rounded-lg border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">{error}</div>}

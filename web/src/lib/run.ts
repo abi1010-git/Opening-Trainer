@@ -47,12 +47,12 @@ export async function runAnalysis(
         current: i,
         total: games.length,
       });
-      analyzed.push(await analyzeGame(game, book, pool, params.plies, params.depth));
+      analyzed.push(await analyzeGame(game, book, pool, params.maxPlies, params.depth));
     }
 
     onProgress({ stage: 'summarizing', message: 'Finding patterns', current: games.length, total: games.length });
     const report: Report = {
-      version: 1,
+      version: 2,
       createdAt: new Date().toISOString(),
       params,
       username: inferDisplayName(analyzed, params.username),

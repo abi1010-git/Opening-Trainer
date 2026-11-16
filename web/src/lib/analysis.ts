@@ -77,8 +77,22 @@ export function positionsFor(moves: string[], plies: number): { fens: string[]; 
   return { fens, ucis, sans };
 }
 
+/** Always check at least the first 8 moves. */
+export const MIN_OPENING_PLIES = 16;
+/** Keep checking 6 moves past the last book position: that's where most opening mistakes happen. */
+export const PLIES_PAST_BOOK = 12;
+
 /**
- * Finds the user's mistakes in the first `plies` half-moves.
+ * Where "the opening" ends for one game: 6 moves after the game leaves known theory,
+ * but never shorter than 8 moves or longer than `maxPlies`.
+ */
+export function openingCutoff(bookPlies: number, maxPlies: number): number {
+  const min = Math.min(MIN_OPENING_PLIES, maxPlies);
+  return Math.max(min, Math.min(maxPlies, bookPlies + PLIES_PAST_BOOK));
+}
+
+/**
+ * Finds the user's mistakes in the opening phase of one game (see `openingCutoff`).
  * Each position is evaluated once: the eval "after" move N is the eval "before" move N+1,
  * which halves the engine work compared to evaluating before and after every move.
  */
@@ -86,9 +100,11 @@ export async function analyzeGame(
   game: GameRecord,
   book: OpeningBook,
   evaluator: Evaluator,
-  plies: number,
+  maxPlies: number,
   depth: number,
 ): Promise<AnalyzedGame> {
+  const opening = identifyOpening(game.moves, book, game.openingHint, game.ecoHint);
+  const plies = Math.min(game.moves.length, openingCutoff(opening.matchedPlies, maxPlies));
   const { fens, ucis, sans } = positionsFor(game.moves, plies);
   const userMovesAt = sans.map((_, i) => i).filter((i) => (i % 2 === 0 ? 'white' : 'black') === game.userColor);
 
@@ -145,7 +161,8 @@ export async function analyzeGame(
 
   return {
     ...game,
-    opening: identifyOpening(game.moves, book, game.openingHint, game.ecoHint),
+    opening,
+    analyzedPlies: sans.length,
     mistakes,
   };
 }

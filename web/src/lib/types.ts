@@ -75,6 +75,8 @@ export interface Mistake {
 
 export interface AnalyzedGame extends GameRecord {
   opening: OpeningInfo;
+  /** How many half-moves were checked (adaptive: depends on where the game left the book). */
+  analyzedPlies: number;
   mistakes: Mistake[];
 }
 
@@ -118,13 +120,14 @@ export interface AnalysisParams {
   site: Site;
   username: string;
   maxGames: number;
-  plies: number;
+  /** Upper limit for the adaptive opening cutoff, in half-moves. */
+  maxPlies: number;
   depth: number;
   speeds: Speed[];
 }
 
 export interface Report {
-  version: 1;
+  version: 2;
   createdAt: string;
   params: AnalysisParams;
   username: string;
