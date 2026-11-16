@@ -7,6 +7,8 @@ export class ImportError extends Error {}
 export interface ImportOptions {
   maxGames: number;
   speeds: Speed[];
+  /** Only games from the last N days (0 or undefined = any time). */
+  sinceDays?: number;
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
 }
@@ -59,6 +61,8 @@ async function importLichess(username: string, opts: ImportOptions): Promise<Gam
     evals: 'false',
   });
   if (opts.speeds.length) params.set('perfType', opts.speeds.map((s) => LICHESS_SPEEDS[s]).join(','));
+  const since = cutoffMs(opts.sinceDays);
+  if (since) params.set('since', String(since));
 
   let res: Response;
   try {
@@ -165,7 +169,11 @@ async function importChessCom(username: string, opts: ImportOptions): Promise<Ga
   )) as { archives?: string[] } | null;
   if (!archives) throw new ImportError(`No Chess.com player called "${username}".`);
 
-  const months = [...(archives.archives ?? [])].reverse().slice(0, MAX_ARCHIVES);
+  const since = cutoffMs(opts.sinceDays);
+  const months = [...(archives.archives ?? [])]
+    .reverse()
+    .slice(0, MAX_ARCHIVES)
+    .filter((url) => !since || archiveEndMs(url) >= since);
   const games: GameRecord[] = [];
   for (const [i, monthUrl] of months.entries()) {
     opts.onProgress?.(`Downloading Chess.com games (month ${i + 1} of ${months.length} checked, ${games.length} found)`);
@@ -175,6 +183,7 @@ async function importChessCom(username: string, opts: ImportOptions): Promise<Ga
       const game = normalizeChessComGame(raw, username);
       if (!game) continue;
       if (opts.speeds.length && !opts.speeds.includes(game.speed)) continue;
+      if (since && Date.parse(game.date) < since) continue;
       games.push(game);
       if (games.length >= opts.maxGames) return games;
     }
@@ -237,4 +246,17 @@ export function normalizeChessComGame(g: ChessComGame, username: string): GameRe
     openingHint: openingFromEcoUrl(headers.ECOUrl ?? g.eco),
     ecoHint: headers.ECO,
   };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function cutoffMs(days: number | undefined): number | null {
+  return days && days > 0 ? Date.now() - days * DAY_MS : null;
+}
+
+/** ".../games/2026/03" → the first moment of April 2026 (UTC), i.e. when that month's archive ends. */
+export function archiveEndMs(url: string): number {
+  const m = url.match(/(\d{4})\/(\d{2})\/?$/);
+  if (!m) return Infinity;
+  return Date.UTC(Number(m[1]), Number(m[2]), 1);
 }

@@ -4,15 +4,16 @@ import Mistakes from './components/Mistakes';
 import Overview from './components/Overview';
 import ProgressView from './components/ProgressView';
 import Repertoire from './components/Repertoire';
+import Scout from './components/Scout';
 import Train from './components/Train';
 import { Button, cx } from './components/ui';
 import { ImportError, runAnalysis } from './lib/run';
-import { cardsFromLeaks, dueCards, type Card } from './lib/srs';
+import { cardsFromLeaks, dueCards, recordRealGames, type Card } from './lib/srs';
 import { cardOwner, loadCards, loadReport, saveCards, saveParams, saveReport } from './lib/storage';
 import type { AnalysisParams, Progress, Report } from './lib/types';
 
-type View = 'home' | 'overview' | 'mistakes' | 'repertoire' | 'train';
-const VIEWS: View[] = ['home', 'overview', 'mistakes', 'repertoire', 'train'];
+type View = 'home' | 'overview' | 'mistakes' | 'repertoire' | 'train' | 'scout';
+const VIEWS: View[] = ['home', 'overview', 'mistakes', 'repertoire', 'train', 'scout'];
 
 function viewFromHash(): View {
   const v = window.location.hash.replace(/^#\/?/, '').split('/')[0] as View;
@@ -28,6 +29,7 @@ export default function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLeak, setSelectedLeak] = useState<string | null>(null);
+  const [scoutResult, setScoutResult] = useState<Report | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -61,7 +63,7 @@ export default function App() {
       // Only drill real errors, plus inaccuracies you keep repeating.
       const drillable = r.leaks.filter((l) => l.severity !== 'inaccuracy' || l.count > 1);
       const owner = cardOwner(params);
-      const nextCards = cardsFromLeaks(drillable, loadCards(owner));
+      const nextCards = recordRealGames(cardsFromLeaks(drillable, loadCards(owner)), r.games);
       ownerRef.current = owner;
       setCards(nextCards);
       saveCards(owner, nextCards);
@@ -112,6 +114,7 @@ export default function App() {
                   ['mistakes', 'Mistakes'],
                   ['repertoire', 'Repertoire'],
                   ['train', 'Train'],
+                  ['scout', 'Scout'],
                 ] as [View, string][]
               ).map(([v, label]) => (
                 <button
@@ -175,6 +178,7 @@ export default function App() {
             )}
             {view === 'mistakes' && <Mistakes report={report} selectedId={selectedLeak} onSelect={setSelectedLeak} />}
             {view === 'repertoire' && <Repertoire report={report} />}
+            {view === 'scout' && <Scout report={report} result={scoutResult} onResult={setScoutResult} />}
             {view === 'train' && <Train key={report.createdAt} cards={cards} onUpdate={updateCard} depth={report.params.depth} />}
           </div>
         )}

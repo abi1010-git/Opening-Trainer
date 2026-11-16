@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { cardsFromLeaks, dueCards, review } from '../src/lib/srs';
+import { cardsFromLeaks, dueCards, recordRealGames, review, transferStatus } from '../src/lib/srs';
+import { positionsFor } from '../src/lib/analysis';
+import { positionKey } from '../src/lib/format';
 import { buildRepertoire, nodeScore, weakLines } from '../src/lib/repertoire';
 import type { AnalyzedGame, Leak } from '../src/lib/types';
 
@@ -19,6 +21,11 @@ function leak(partial: Partial<Leak>): Leak {
     bestUci: 'e7e5',
     bestLineSan: ['e5'],
     replySan: null,
+    refutationSan: [],
+    lineBefore: ['e4'],
+    allowsMate: false,
+    evalBefore: 0,
+    evalAfter: -1,
     count: 1,
     avgDropPawns: 1,
     severity: 'mistake',
@@ -86,5 +93,42 @@ describe('repertoire', () => {
   it('flags the most specific weak line', () => {
     const weak = weakLines(buildRepertoire(games, 'white'), 3);
     expect(weak.map((n) => n.path.join(' '))).toEqual(['e4 c5 Nf3']);
+  });
+});
+
+describe('training transfer', () => {
+  // A drill for Black after 1.e4: the answer is 1...e5.
+  const fen = positionsFor(['e4'], 1).fens[1];
+  const base = cardsFromLeaks([leak({ positionKey: positionKey(fen), fenBefore: fen })], {}, 0);
+  const id = positionKey(fen);
+  const game = (gid: string, date: string, second: string, mistakes: number[] = []) =>
+    ({ id: gid, userColor: 'black', date, moves: ['e4', second, 'Nf3'], analyzedPlies: 16, mistakes: mistakes.map((ply) => ({ ply })) }) as unknown as AnalyzedGame;
+
+  it('is "untrained" before any drill, even if the position was reached', () => {
+    const cards = recordRealGames(base, [game('g1', '2026-01-01T00:00:00Z', 'f6', [2])]);
+    expect(cards[id].encounters).toHaveLength(1);
+    expect(transferStatus(cards[id])).toBe('untrained');
+  });
+
+  it('marks a habit fixed when you play the right move after training', () => {
+    const trained = { [id]: review(base[id], true, Date.parse('2026-02-01T00:00:00Z')) };
+    const cards = recordRealGames(trained, [game('old', '2026-01-01T00:00:00Z', 'f6', [2]), game('new', '2026-03-01T00:00:00Z', 'e5')]);
+    expect(transferStatus(cards[id])).toBe('fixed');
+  });
+
+  it('marks it still repeating when the mistake comes back', () => {
+    const trained = { [id]: review(base[id], true, Date.parse('2026-02-01T00:00:00Z')) };
+    const cards = recordRealGames(trained, [game('new', '2026-03-01T00:00:00Z', 'f6', [2])]);
+    expect(transferStatus(cards[id])).toBe('repeating');
+  });
+
+  it('counts each game once across re-analyses', () => {
+    const g = game('g1', '2026-03-01T00:00:00Z', 'e5');
+    const once = recordRealGames(base, [g]);
+    expect(recordRealGames(once, [g])[id].encounters).toHaveLength(1);
+  });
+
+  it('is "unseen" when trained but not reached since', () => {
+    expect(transferStatus(review(base[id], true, Date.now()))).toBe('unseen');
   });
 });

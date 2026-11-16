@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { moveLabel, pct, plural } from '../lib/format';
 import { buildRepertoire, nodeScore, weakLines } from '../lib/repertoire';
 import type { Card as SrsCard } from '../lib/srs';
-import { dueCards } from '../lib/srs';
+import { dueCards, gamesSinceTraining, transferStatus, transferSummary, type TransferStatus } from '../lib/srs';
 import type { Leak, Report } from '../lib/types';
 import Board from './Board';
 import { Button, Card, ColorDot, ScoreBar, SectionTitle, SeverityBadge, Stat } from './ui';
@@ -93,6 +93,8 @@ export default function Overview({ report, cards, onOpenLeak, onTrain, onReperto
         )}
       </section>
 
+      <TransferSection cards={cards} />
+
       {weak.length > 0 && (
         <section>
           <SectionTitle
@@ -113,6 +115,7 @@ export default function Overview({ report, cards, onOpenLeak, onTrain, onReperto
                   <div className="mt-1.5 flex items-center gap-3 text-xs text-muted">
                     <span>{plural(n.games, 'game')}</span>
                     <span className="text-bad">{pct(nodeScore(n))} score</span>
+                    {n.games < 5 && <span>small sample</span>}
                   </div>
                 </div>
                 <div className="w-24">
@@ -154,7 +157,10 @@ export default function Overview({ report, cards, onOpenLeak, onTrain, onReperto
                   <td className="px-4 py-3">
                     <ScoreBar wins={o.wins} draws={o.draws} losses={o.losses} />
                   </td>
-                  <td className={`px-4 py-3 tabular-nums ${o.score >= 0.5 ? 'text-accent' : 'text-bad'}`}>{pct(o.score)}</td>
+                  <td className={`px-4 py-3 tabular-nums ${o.score >= 0.5 ? 'text-accent' : 'text-bad'}`}>
+                    {pct(o.score)}
+                    {o.games < 5 && <span className="ml-1.5 text-[11px] text-muted" title="Under 5 games: this score can swing a lot">few games</span>}
+                  </td>
                   <td className="px-4 py-3 tabular-nums">{(o.mistakes / o.games).toFixed(1)}</td>
                   <td className="px-4 py-3 tabular-nums text-muted">{o.avgFirstMistakeMove ? `move ${o.avgFirstMistakeMove}` : '—'}</td>
                 </tr>
@@ -174,4 +180,63 @@ export default function Overview({ report, cards, onOpenLeak, onTrain, onReperto
 
 export function formatLine(path: string[]): string {
   return path.map((san, i) => (i % 2 === 0 ? `${i / 2 + 1}.${san}` : san)).join(' ');
+}
+
+const STATUS_LABEL: Record<TransferStatus, { text: string; tone: string }> = {
+  fixed: { text: 'Fixed in real games', tone: 'bg-accent/15 text-accent' },
+  repeating: { text: 'Still repeating', tone: 'bg-bad/15 text-bad' },
+  unseen: { text: 'Not reached since training', tone: 'bg-muted/15 text-muted' },
+  untrained: { text: 'Not trained yet', tone: 'bg-muted/15 text-muted' },
+};
+
+/** Did drilling a position change what you play in real games? */
+function TransferSection({ cards }: { cards: Record<string, SrsCard> }) {
+  const summary = transferSummary(cards);
+  const trained = summary.fixed + summary.repeating + summary.unseen;
+  if (!trained) return null;
+  const order: TransferStatus[] = ['repeating', 'fixed', 'unseen'];
+  const rows = Object.values(cards)
+    .filter((c) => transferStatus(c) !== 'untrained')
+    .sort((a, b) => order.indexOf(transferStatus(a)) - order.indexOf(transferStatus(b)) || b.timesPlayed - a.timesPlayed)
+    .slice(0, 6);
+
+  return (
+    <section>
+      <SectionTitle
+        title="Is your training working?"
+        subtitle="Positions you've drilled, checked against the real games you played afterwards."
+      />
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        <Stat label="Fixed" value={summary.fixed} hint="Right move in your latest game" tone={summary.fixed ? 'good' : undefined} />
+        <Stat label="Still repeating" value={summary.repeating} hint="Same mistake after training" tone={summary.repeating ? 'bad' : undefined} />
+        <Stat label="Not reached yet" value={summary.unseen} hint="Play more games to find out" />
+      </div>
+      <Card className="p-0">
+        <ul>
+          {rows.map((c) => {
+            const status = transferStatus(c);
+            const after = gamesSinceTraining(c);
+            const right = after.filter((e) => e.correct).length;
+            const last = after[after.length - 1];
+            return (
+              <li key={c.id} className="flex flex-wrap items-center gap-3 border-b border-line/60 px-4 py-3 text-sm last:border-0">
+                <ColorDot color={c.color} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate">
+                    {c.opening} · answer <span className="font-semibold text-accent">{c.answerSan}</span>
+                  </div>
+                  <div className="text-xs text-muted">
+                    {status === 'unseen'
+                      ? "You haven't reached this position in a game since you started drilling it."
+                      : `Right in ${right} of ${plural(after.length, 'game')} since training. Last time you played ${last.playedSan}.`}
+                  </div>
+                </div>
+                <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${STATUS_LABEL[status].tone}`}>{STATUS_LABEL[status].text}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    </section>
+  );
 }
